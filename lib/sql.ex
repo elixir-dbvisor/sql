@@ -99,7 +99,8 @@ defmodule SQL do
   defimpl Inspect, for: SQL do
     def inspect(sql, _opts) do
       fun = SQL.__token_to_sql__(sql)
-      Enum.reduce(0..length(sql.params), to_string(sql), &String.replace(&2, fun.({:binding, [], [&1]}), fun.(Enum.at(sql.params, &1))))
+      string = "#SQL<#{to_string(sql)}"
+      Enum.reduce(0..length(sql.params), String.pad_trailing(string, byte_size(string)+2, ";>"), &String.replace(&2, fun.({:binding, [], [&1]}), fun.(Enum.at(sql.params, &1))))
     end
   end
 
