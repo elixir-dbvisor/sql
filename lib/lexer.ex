@@ -24,13 +24,13 @@ defmodule SQL.Lexer do
   def expected_delimiter(:backtick), do: :"`"
   def expected_delimiter(type) when type in ~w[var code braces]a, do: :"}"
 
-  def lex(binary, meta, params \\ 0, opts \\ [metadata: true]) do
-    case lex(binary, binary, [{:binding, []}, {:params, params}, {:meta, meta} | opts], 0, 0, nil, [], [], 0) do
+  def lex(binary, file, params \\ 0, opts \\ [metadata: true]) do
+    case lex(binary, binary, [{:binding, []}, {:params, params}, {:file, file} | opts], 0, 0, nil, [], [], 0) do
       {"", _binary, opts, line, column, nil = type, data, acc, _n} ->
         {:ok, opts, line, column, type, data, acc}
 
       {"", binary, _opts, end_line, end_column, type, _data, [{_, [line: line, column: column, file: file], _}|_], _n} when type in ~w[parens bracket double_quote quote backtick var code]a ->
-        raise TokenMissingError, file: "#{file}", snippet: binary, end_line: end_line, end_column: end_column, line: line, column: column, opening_delimiter: opening_delimiter(type), expected_delimiter: expected_delimiter(type)
+        raise TokenMissingError, file: file, snippet: binary, end_line: end_line, end_column: end_column, line: line, column: column, opening_delimiter: opening_delimiter(type), expected_delimiter: expected_delimiter(type)
 
       {"", _binary, opts, line, column, type, data, acc, _n} ->
         {:ok, opts, line, column, type, data, insert_node(node(ident(type, data), line, column, data, opts), acc)}
@@ -51,7 +51,7 @@ defmodule SQL.Lexer do
   def lex(<<b, rest::binary>>, binary, opts, line, column, :comments, data, acc, n) do
     lex(rest, binary, opts, line, column+1, :comments, [data | [b]], acc, n)
   end
-  def lex(<<?{, ?{, rest::binary>>, binary, opts, line, column, _type, data, acc, n) do
+  def lex(<<?{, ?{, rest::binary>>, binary, opts, line, column, nil, data, acc, n) do
     lex(rest, binary, opts, line, column+2, :var, data, acc, n)
   end
   def lex(<<?}, ?}, rest::binary>>, binary, [_, _, _, {:format, true}] = opts, line, column, _type, data, acc, 0 = n), do: lex(rest, binary, opts, line, column+2, nil, [], insert_node(node(:binding, line, column, data, opts), acc), n)
@@ -266,7 +266,7 @@ defmodule SQL.Lexer do
   def type(_b, _type), do: :ident
 
   def meta(_line, _column, [_,_,_,{_,false}|_]), do: []
-  def meta(line, column, [_, _, {_, {_, _, file}} |_]), do: [line: line, column: column, file: file]
+  def meta(line, column, [_, _, {_, file} |_]), do: [line: line, column: column, file: file]
 
   def node(:binding = tag, line, column, [idx], [{:binding, false}, {:params, params}|_] = opts) do
     {tag, meta(line, column, opts), Enum.at(params, idx)}

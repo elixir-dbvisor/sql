@@ -18,18 +18,20 @@ Brings an extensible SQL parser and sigil to Elixir, confidently write SQL with 
 ```elixir
 iex(1)> email = "john@example.com"
 "john@example.com"
-iex(2)> select = ~SQL"select id, email"
-"select id, email"
-iex(3)> ~SQL[from users] |> ~SQL[where email = #{email}] |> select
-"select id, email from users where email = \"john@example.com\""
-iex(4)> sql = ~SQL[from users where email = #{email} select id, email]
-"select id, email from users where email = \"john@example.com\""
+iex(2)> ~SQL[from users] |> ~SQL[where email = {{email}}] |> ~SQL"select id, email"
+~SQL"""
+where email = {{email}} from users select id, email
+"""
+iex(4)> sql = ~SQL[from users where email = {{email}} select id, email]
+~SQL"""
+from users where email = {{email}} select id, email
+"""
 iex(5)> to_sql(sql)
-{"select id, email from users where email = $0", ["john@example.com"]}
+{"select id, email from users where email = ?", ["john@example.com"]}
 iex(6)> to_string(sql)
-"select id, email from users where email = $0"
+"select id, email from users where email = ?"
 iex(7)> inspect(sql)
-"select id, email from users where email = \"john@example.com\""
+"~SQL\"\"\"\nfrom users where email = {{email}} select id, email\n\"\"\""
 ```
 
 ### Leverage the Enumerable protocol in your repository

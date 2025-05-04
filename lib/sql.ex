@@ -38,48 +38,7 @@ defmodule SQL do
       {"select id, email from users where email = $0", ["john@example.com"]}
   """
   @doc since: "0.1.0"
-  def to_sql(sql), do: {:persistent_term.get(sql.id), sql.params}
-
-  @doc false
-  def build(right, {:<<>>, meta, _} = left, _modifiers, env) do
-    quote bind_quoted: [right: Macro.unpipe(right), left: left, meta: Macro.escape({meta[:line], meta[:column] || 0, env.file}), e: Macro.escape(env)] do
-      {t, p} = Enum.reduce(right, {[], []}, fn
-        {[], 0}, acc -> acc
-        {v, 0}, {tokens, params} -> {tokens ++ v.tokens, params ++ v.params}
-        end)
-      binding = binding()
-      id = {__MODULE__, :binary.decode_unsigned(left), meta}
-      {tokens, params} = tokens(left, meta, length(p), id)
-      tokens = t ++ tokens
-      params = Enum.reduce(params, p, fn
-          {:var, var}, acc -> acc ++ [binding[String.to_atom(var)]]
-          {:code, code}, acc -> acc ++ [elem(Code.eval_string(code, binding), 0)]
-      end)
-      struct(SQL, params: params, tokens: tokens, id: plan(id, tokens), module: __MODULE__)
-    end
-  end
-
-  def tokens(left, meta, p, id) do
-    if result = :persistent_term.get(id, nil) do
-      result
-    else
-      {:ok, opts, _, _, _, _, tokens} = SQL.Lexer.lex(left, meta, p)
-      result = {tokens, opts[:binding]}
-      :persistent_term.put(id, result)
-      result
-    end
-  end
-
-  def plan(id, tokens) do
-    if uid = :persistent_term.get(tokens, nil) do
-      uid
-    else
-      uid = System.unique_integer([:positive])
-      :persistent_term.put(tokens, uid)
-      :persistent_term.put(uid, to_string(SQL.to_query(SQL.Parser.parse(tokens)), elem(id, 0)))
-      uid
-    end
-  end
+  def to_sql(%{params: params, id: id, module: module}), do: {:persistent_term.get({module, id, :plan}), params}
 
   @doc """
   Handles the sigil `~SQL` for SQL.
@@ -124,7 +83,16 @@ defmodule SQL do
     token
   end
 
+  defimpl Inspect, for: SQL do
+    def inspect(sql, _opts), do: Inspect.Algebra.concat(["~SQL\"\"\"\n", :persistent_term.get({sql.id, :inspect}), "\n\"\"\""])
+  end
 
+  defimpl String.Chars, for: SQL do
+    def to_string(%{id: id, module: module}), do: :persistent_term.get({module, id, :plan})
+    def to_string(%{tokens: tokens, module: module}), do: SQL.to_string(tokens, module)
+  end
+
+  @doc false
   def to_string(tokens, module) do
     fun = cond do
       Kernel.function_exported?(module, :sql_config, 0) -> &module.sql_config()[:adapter].token_to_string(&1)
@@ -143,19 +111,99 @@ defmodule SQL do
     |> IO.iodata_to_binary()
   end
 
-
-  defimpl Inspect, for: SQL do
-    def inspect(sql, _opts) do
-      if Kernel.function_exported?(sql.module, :sql_config, 0) do
-        Enum.reduce(0..length(sql.params), :persistent_term.get(sql.id), &String.replace(&2, sql.module.sql_config()[:adapter].token_to_string({:binding, [], [&1]}), sql.module.sql_config()[:adapter].token_to_string(Enum.at(sql.params, &1)), global: false))
-      else
-        Enum.reduce(0..length(sql.params), :persistent_term.get(sql.id), &String.replace(&2, SQL.String.token_to_sql({:binding, [], [&1]}), SQL.String.token_to_sql(Enum.at(sql.params, &1))))
-      end
+  @doc false
+  def build(left, {:<<>>, _, _} = right, _modifiers, env) do
+    data = build(left, right)
+    quote bind_quoted: [module: env.module, left: Macro.unpipe(left), right: right, file: env.file, id: id(data), data: data] do
+      plan_inspect(data, id)
+      {t, p} = Enum.reduce(left, {[], []}, fn
+        {[], 0}, acc -> acc
+        {v, 0}, {t, p} ->
+        {t ++ v.tokens, p ++ v.params}
+        end)
+      {tokens, params} = tokens(right, file, length(p), id)
+      tokens = t ++ tokens
+      plan(tokens, id, module)
+      struct(SQL, params: cast_params(params, p, binding()), tokens: tokens, id: id, module: module)
     end
   end
 
-  defimpl String.Chars, for: SQL do
-    def to_string(%{id: id}), do: :persistent_term.get(id)
-    def to_string(%{tokens: tokens, module: module}), do: SQL.to_string(tokens, module)
+  @doc false
+  def build(left, {:<<>>, _, right}) do
+    left
+    |> Macro.unpipe()
+    |> Enum.reduce({:iodata, right}, fn
+        {[], 0}, acc -> acc
+        {{:sigil_SQL, _meta, [{:<<>>, _, value}, []]}, 0}, {type, acc} -> {type, [value, ?\s, acc]}
+        {{_, _, _} = var, 0}, {_, acc} ->
+        {:dynamic, [var, ?\s, acc]}
+    end)
+    |> case do
+      {:iodata, data} -> IO.iodata_to_binary(data)
+      {:dynamic, data} -> data
+    end
+  end
+
+  @doc false
+  def id(data) do
+    if id = :persistent_term.get(data, nil) do
+      id
+    else
+      id = System.unique_integer([:positive])
+      :persistent_term.put(data, id)
+      id
+    end
+  end
+
+  @doc false
+  def cast_params(bindings, params, binding) do
+    Enum.reduce(bindings, params, fn
+        {:var, var}, acc -> if v = binding[String.to_atom(var)], do: acc ++ [v], else: acc
+        {:code, code}, acc -> acc ++ [elem(Code.eval_string(code, binding), 0)]
+    end)
+  end
+
+  @doc false
+  def tokens(binary, file, count, id) do
+    key = {id, :lex}
+    if result = :persistent_term.get(key, nil) do
+      result
+    else
+      {:ok, opts, _, _, _, _, tokens} = SQL.Lexer.lex(binary, file, count)
+      result = {tokens, opts[:binding]}
+      :persistent_term.put(key, result)
+      result
+    end
+  end
+
+  @doc false
+  def plan(tokens, id, module) do
+    key = {module, id, :plan}
+    if :persistent_term.get(key, nil) do
+      id
+    else
+      :persistent_term.put(key, to_string(SQL.to_query(SQL.Parser.parse(tokens)), module))
+      id
+    end
+  end
+
+  @doc false
+  def plan_inspect(data, id) do
+    key = {id, :inspect}
+    if !:persistent_term.get(key, nil) do
+      data = case data do
+               data when is_list(data) ->
+                 data
+                 |> Enum.map(fn
+                    ast when is_struct(ast) -> :persistent_term.get({ast.id, :inspect}, nil)
+                    x -> x
+                 end)
+                 |> IO.iodata_to_binary()
+
+               data -> data
+             end
+
+      :persistent_term.put(key, data)
+    end
   end
 end

@@ -33,7 +33,7 @@ defmodule SQLTest do
   end
 
   test "inspect/1" do
-    assert "select +1000" == inspect(~SQL[select +1000])
+    assert ~s(~SQL"""\nselect +1000\n""") == inspect(~SQL[select +1000])
   end
 
   test "to_sql/1" do
