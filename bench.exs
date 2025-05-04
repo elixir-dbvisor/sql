@@ -5,6 +5,7 @@ defmodule SQL.Repo do
 end
 Application.put_env(:sql, :ecto_repos, [SQL.Repo])
 Application.put_env(:sql, SQL.Repo, username: "postgres", password: "postgres", hostname: "localhost", database: "sql_test#{System.get_env("MIX_TEST_PARTITION")}", pool: Ecto.Adapters.SQL.Sandbox, pool_size: 10)
+SQL.Repo.__adapter__().storage_up(SQL.Repo.config())
 SQL.Repo.start_link()
 range = 1..10_000
 Benchee.run(

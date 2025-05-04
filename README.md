@@ -65,6 +65,9 @@ iex(7)> inspect(sql)
   [%{"id" => 1, "email" => "john@example.com"}, %{"id" => 2, "email" => "jane@example.com"}]
 ```
 
+## Benchmark
+You can find benchmark results [here](benchmarks) or run `mix sql.bench`
+```
 
 ## Installation
 
