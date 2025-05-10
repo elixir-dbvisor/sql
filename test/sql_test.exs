@@ -59,46 +59,46 @@ defmodule SQLTest do
   describe "error" do
     test "missing )" do
       assert_raise TokenMissingError, ~r"token missing on", fn ->
-        ~SQL[select id in (1, 2]
+        SQL.parse("select id in (1, 2")
       end
       assert_raise TokenMissingError, ~r"token missing on", fn ->
-        ~SQL[select id from users join orgs on (id = id]
+        SQL.parse("select id from users join orgs on (id = id")
       end
     end
 
     test "missing ]" do
       assert_raise TokenMissingError, ~r"token missing on", fn ->
-        ~SQL{select id in ([1)}
+        SQL.parse("select id in ([1)")
       end
       assert_raise TokenMissingError, ~r"token missing on", fn ->
-        ~SQL{select id from users join orgs on ([1)}
+        SQL.parse("select id from users join orgs on ([1)")
       end
     end
 
     test "missing }" do
       assert_raise TokenMissingError, ~r"token missing on", fn ->
-        ~SQL[select id in {{1]
+        SQL.parse("select id in {{1")
       end
       assert_raise TokenMissingError, ~r"token missing on", fn ->
-        ~SQL[select id from users join orgs on {{id]
+        SQL.parse("select id from users join orgs on {{id")
       end
     end
 
     test "missing \"" do
       assert_raise TokenMissingError, ~r"token missing on", fn ->
-        ~SQL[select id in "1]
+        SQL.parse("select id in \"1")
       end
       assert_raise TokenMissingError, ~r"token missing on", fn ->
-        ~SQL[select id from users join orgs on "id]
+        SQL.parse("select id from users join orgs on \"id")
       end
     end
 
     test "missing \'" do
       assert_raise TokenMissingError, ~r"token missing on", fn ->
-        ~SQL[select id in '1]
+        SQL.parse("select id in '1")
       end
       assert_raise TokenMissingError, ~r"token missing on", fn ->
-        ~SQL[select id from users join orgs on 'id]
+        SQL.parse("select id from users join orgs on 'id")
       end
     end
   end
