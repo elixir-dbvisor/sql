@@ -8,11 +8,14 @@ defmodule SQL do
                |> Enum.fetch!(1)
   @moduledoc since: "0.1.0"
 
+  @adapters [SQL.Adapters.ANSI, SQL.Adapters.MySQL, SQL.Adapters.Postgres, SQL.Adapters.TDS]
+
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
       @doc false
       @behaviour SQL
       import SQL
+      @sql_adapter opts[:adapter]
       def sql_config, do: unquote(opts)
       def token_to_sql(token), do: token_to_sql(token)
       defoverridable token_to_sql: 1
@@ -27,7 +30,15 @@ defmodule SQL do
   @doc deprecated: "Use SQL.Token.token_to_string/1 instead"
   @callback token_to_sql(token :: {atom, keyword, list}) :: String.t()
 
-  defstruct [:tokens, :params, :module, :id]
+  defstruct [:tokens, :params, :module, :id, :string, :inspect]
+
+  defimpl Inspect, for: SQL do
+    def inspect(sql, _opts), do: Inspect.Algebra.concat(["~SQL\"\"\"\n", sql.inspect, "\n\"\"\""])
+  end
+
+  defimpl String.Chars, for: SQL do
+    def to_string(sql), do: sql.string
+  end
 
   @doc """
   Returns a parameterized SQL.
@@ -38,7 +49,7 @@ defmodule SQL do
       {"select id, email from users where email = ?", ["john@example.com"]}
   """
   @doc since: "0.1.0"
-  def to_sql(%{params: params, id: id, module: module}), do: {:persistent_term.get({module, id, :plan}), params}
+  def to_sql(sql), do: {sql.string, sql.params}
 
   @doc """
   Handles the sigil `~SQL` for SQL.
@@ -59,11 +70,11 @@ defmodule SQL do
   @doc false
   @doc since: "0.1.0"
   def parse(binary) do
-    {:ok, _opts, _, _, _, _, tokens} = SQL.Lexer.lex(binary, {1, 0, nil}, 0, [format: true])
+    {:ok, _opts, _, _, _, _, tokens} = SQL.Lexer.lex(binary, __ENV__.file, 0, [format: true])
     tokens
     |> SQL.Parser.parse()
     |> to_query()
-    |> to_string(SQL.String)
+    |> to_string(SQL.Adapters.ANSI)
   end
 
   @doc false
@@ -85,16 +96,19 @@ defmodule SQL do
     token
   end
 
-  defimpl Inspect, for: SQL do
-    def inspect(sql, _opts), do: Inspect.Algebra.concat(["~SQL\"\"\"\n", :persistent_term.get({sql.id, :inspect}), "\n\"\"\""])
-  end
-
-  defimpl String.Chars, for: SQL do
-    def to_string(%{id: id, module: module}), do: :persistent_term.get({module, id, :plan})
-    def to_string(%{tokens: tokens, module: module}), do: SQL.to_string(tokens, module)
-  end
-
   @doc false
+  def to_string(tokens, module) when module in @adapters do
+    tokens
+    |> Enum.reduce([], fn
+      token, [] = acc -> [acc | module.token_to_string(token)]
+      token, acc ->
+      case module.token_to_string(token) do
+        <<";", _::binary>> = v -> [acc | v]
+        v -> [acc, " " | v]
+      end
+    end)
+    |> IO.iodata_to_binary()
+  end
   def to_string(tokens, module) do
     fun = cond do
       Kernel.function_exported?(module, :sql_config, 0) -> &module.sql_config()[:adapter].token_to_string(&1)
@@ -115,18 +129,31 @@ defmodule SQL do
 
   @doc false
   def build(left, {:<<>>, _, _} = right, _modifiers, env) do
-    data = build(left, right)
-    quote bind_quoted: [module: env.module, left: Macro.unpipe(left), right: right, file: env.file, id: id(data), data: data] do
-      plan_inspect(data, id)
-      {t, p} = Enum.reduce(left, {[], []}, fn
-        {[], 0}, acc -> acc
-        {v, 0}, {t, p} ->
-        {t ++ v.tokens, p ++ v.params}
-        end)
-      {tokens, params} = tokens(right, file, length(p), id)
-      tokens = t ++ tokens
-      plan(tokens, id, module)
-      struct(SQL, params: cast_params(params, p, binding()), tokens: tokens, id: id, module: module)
+    case build(left, right) do
+      {:static, data} ->
+        {:ok, opts, _, _, _, _, tokens} = SQL.Lexer.lex(data, env.file)
+        tokens = SQL.to_query(SQL.Parser.parse(tokens))
+        string = if mod = env.module do
+            SQL.to_string(tokens, Module.get_attribute(mod, :sql_adapter))
+            else
+            SQL.to_string(tokens, SQL.Adapters.ANSI)
+        end
+        sql = struct(SQL, tokens: tokens, string: string, module: env.module, inspect: data, id: id(data))
+        quote bind_quoted: [params: opts[:binding], sql: Macro.escape(sql)] do
+            %{sql | params: cast_params(params, [], binding())}
+        end
+
+      {:dynamic, data} ->
+        sql = struct(SQL, id: id(data), module: env.module)
+        quote bind_quoted: [left: Macro.unpipe(left), right: right, file: env.file, data: data, sql: Macro.escape(sql)] do
+          {t, p} = Enum.reduce(left, {[], []}, fn
+            {[], 0}, acc   -> acc
+            {v, 0}, {t, p} -> {t ++ v.tokens, p ++ v.params}
+            end)
+          {tokens, params} = tokens(right, file, length(p), sql.id)
+          tokens = t ++ tokens
+          %{sql | params: cast_params(params, p, binding()), tokens: tokens, string: plan(tokens, sql.id, sql.module), inspect: plan_inspect(data, sql.id)}
+        end
     end
   end
 
@@ -134,15 +161,14 @@ defmodule SQL do
   def build(left, {:<<>>, _, right}) do
     left
     |> Macro.unpipe()
-    |> Enum.reduce({:iodata, right}, fn
+    |> Enum.reduce({:static, right}, fn
         {[], 0}, acc -> acc
         {{:sigil_SQL, _meta, [{:<<>>, _, value}, []]}, 0}, {type, acc} -> {type, [value, ?\s, acc]}
-        {{_, _, _} = var, 0}, {_, acc} ->
-        {:dynamic, [var, ?\s, acc]}
+        {{_, _, _} = var, 0}, {_, acc} -> {:dynamic, [var, ?\s, acc]}
     end)
     |> case do
-      {:iodata, data} -> IO.iodata_to_binary(data)
-      {:dynamic, data} -> data
+      {:static, data} -> {:static, IO.iodata_to_binary(data)}
+      {:dynamic, data} -> {:dynamic, data}
     end
   end
 
@@ -181,31 +207,31 @@ defmodule SQL do
   @doc false
   def plan(tokens, id, module) do
     key = {module, id, :plan}
-    if :persistent_term.get(key, nil) do
-      id
+    if string = :persistent_term.get(key, nil) do
+      string
     else
-      :persistent_term.put(key, to_string(SQL.to_query(SQL.Parser.parse(tokens)), module))
-      id
+      string = to_string(SQL.to_query(SQL.Parser.parse(tokens)), module)
+      :persistent_term.put(key, string)
+      string
     end
   end
 
   @doc false
   def plan_inspect(data, id) do
     key = {id, :inspect}
-    if !:persistent_term.get(key, nil) do
-      data = case data do
-               data when is_list(data) ->
-                 data
-                 |> Enum.map(fn
-                    ast when is_struct(ast) -> :persistent_term.get({ast.id, :inspect}, nil)
-                    x -> x
-                 end)
-                 |> IO.iodata_to_binary()
+    if inspect = :persistent_term.get(key, nil) do
+        inspect
+    else
+        inspect = data
+                |> Enum.map(fn
+                ast when is_struct(ast) -> ast.inspect
+                x -> x
+                end)
+                |> IO.iodata_to_binary()
 
-               data -> data
-             end
 
-      :persistent_term.put(key, data)
+        :persistent_term.put(key, inspect)
+        inspect
     end
   end
 end
