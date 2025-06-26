@@ -263,6 +263,54 @@ defmodule SQL.Adapters.PostgresTest do
       assert "where id <= 1" == to_string(~SQL[where id <= 1])
       assert "where id <= 1" == to_string(~SQL[where id<=1])
     end
+    test "<<" do
+      assert "where id << 1" == to_string(~SQL[where id << 1])
+    end
+    test "&<" do
+      assert "where id &< 1" == to_string(~SQL[where id &< 1])
+    end
+    test "&&" do
+      assert "where id && 1" == to_string(~SQL[where id && 1])
+    end
+    test "&>" do
+      assert "where id &> 1" == to_string(~SQL[where id &> 1])
+    end
+    test ">>" do
+      assert "where id >> 1" == to_string(~SQL[where id >> 1])
+    end
+    test "~=" do
+      assert "where id ~= 1" == to_string(~SQL[where id ~= 1])
+    end
+    test "@>" do
+      assert "where id @> 1" == to_string(~SQL[where id @> 1])
+    end
+    test "<@" do
+      assert "where id <@ 1" == to_string(~SQL[where id <@ 1])
+    end
+    test "&<|" do
+      assert "where id &<| 1" == to_string(~SQL[where id &<| 1])
+    end
+    test "<<|" do
+      assert "where id <<| 1" == to_string(~SQL[where id <<| 1])
+    end
+    test "|>>" do
+      assert "where id |>> 1" == to_string(~SQL[where id |>> 1])
+    end
+    test "|&>" do
+      assert "where id |&> 1" == to_string(~SQL[where id |&> 1])
+    end
+    test "@@" do
+      assert "where id @@ 1" == to_string(~SQL[where id @@ 1])
+    end
+    test "<->" do
+      assert "where id <-> 1" == to_string(~SQL[where id <-> 1])
+    end
+    test ">>=" do
+      assert "where id <-> 1" == to_string(~SQL[where id <-> 1])
+    end
+    test "-|-" do
+      assert "where id -|- 1" == to_string(~SQL[where id -|- 1])
+    end
     test "between" do
       assert "where id between 1 and 2" == to_string(~SQL[where id between 1 and 2])
       assert "where id not between 1 and 2" == to_string(~SQL[where id not between 1 and 2])

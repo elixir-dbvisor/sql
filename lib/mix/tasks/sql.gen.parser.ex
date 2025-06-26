@@ -414,7 +414,7 @@ defmodule Mix.Tasks.Sql.Gen.Parser do
       acc = if type, do: insert_node(node(ident(type, data), line, column, data, opts), acc), else: acc
       lex(rest, binary, opts, line, column, nil, [], insert_node(node(type(b), line, column+1, [], opts), acc), n)
     end
-    def lex(<<b::binary-size(3), rest::binary>>, binary, opts, line, column, type, data, acc, n) when b in ~w[^-= |*= <=>] do
+    def lex(<<b::binary-size(3), rest::binary>>, binary, opts, line, column, type, data, acc, n) when b in ~w[^-= |*= <=> <-> >>= &<| <<| |>> |&> -|-] do
       node = node(String.to_atom(b), line, column+3, [], opts)
       if data == [] do
         lex(rest, binary, opts, line, column+3, type, data, insert_node(node, acc), n)
@@ -422,7 +422,7 @@ defmodule Mix.Tasks.Sql.Gen.Parser do
         lex(rest, binary, opts, line, column+3, nil, [], insert_node(node, insert_node(node(ident(type, data), line, column, data, opts), acc)), n)
       end
     end
-    def lex(<<b::binary-size(2), rest::binary>>, binary, opts, line, column, type, data, acc, n) when b in ~w[:: <> != !< !> <= >= += -= *= /= %= &= ||] do
+    def lex(<<b::binary-size(2), rest::binary>>, binary, opts, line, column, type, data, acc, n) when b in ~w[:: <> != !< !> <= >= += -= *= /= %= &= || << &< && &> >> ~= @> <@ @@] do
       node = node(String.to_atom(b), line, column+2, [], opts)
       if data == [] do
         lex(rest, binary, opts, line, column+2, type, data, insert_node(node, acc), n)
