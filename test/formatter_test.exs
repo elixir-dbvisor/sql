@@ -9,6 +9,6 @@ defmodule SQL.FormatterTest do
   end
 
   test "format/2 preserve interpolation" do
-    assert "with recursive temp (n, fact) as (select 0, 1 union all select n + {{one}}, (n + {{one}}) * fact from temp where n < 9)" == SQL.MixFormatter.format("with recursive temp(n, fact) as (select 0, 1 union all select n + {{one}}, (n + {{one}}) * fact from temp where n < 9)", [])
+    assert "with recursive temp(n, fact) as (select 0, 1 union all select n + {{one}}, (n + {{one}}) * fact from temp where n < 9)" == SQL.MixFormatter.format("with recursive temp(n, fact) as (select 0, 1 union all select n + {{one}}, (n + {{one}}) * fact from temp where n < 9)", [])
   end
 end

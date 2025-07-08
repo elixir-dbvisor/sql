@@ -16,10 +16,10 @@ defmodule SQLTest do
   describe "composable" do
     test "pipedream" do
       sql = ~SQL[from users u]
-      |> ~SQL[where u.email = "john@example.com"]
+      |> ~SQL{where u.email = 'john@example.com'}
       |> ~SQL[select id, email, inserted_at, updated_at]
 
-      assert ~s(select id, email, inserted_at, updated_at from users u where u.email = "john@example.com") == to_string(sql)
+      assert ~s(select id, email, inserted_at, updated_at from users u where u.email = 'john@example.com') == to_string(sql)
     end
 
     test "functional" do
@@ -167,9 +167,7 @@ defmodule SQLTest do
       from top_customers tc
       order by tc.spending_rank
       ]
-
-      output = to_string(sql)
-      assert output == "with customer_rankings as(select customer_id, sum(amount) as total_spent, rank() over(order by sum(amount) desc) as spending_rank from transactions group by customer_id), top_customers as(select c.customer_id, c.name, cr.total_spent, cr.spending_rank from customer_rankings cr join customers c on c.customer_id = cr.customer_id where cr.spending_rank <= 10) select tc.name, tc.total_spent, tc.spending_rank from top_customers tc order by tc.spending_rank"
+      assert "with customer_rankings as(select customer_id, sum(amount) as total_spent, rank() over(order by sum(amount) desc) as spending_rank from transactions group by customer_id), top_customers as(select c.customer_id, c.name, cr.total_spent, cr.spending_rank from customer_rankings cr join customers c on c.customer_id = cr.customer_id where cr.spending_rank <= 10) select tc.name, tc.total_spent, tc.spending_rank from top_customers tc order by tc.spending_rank" == to_string(sql)
     end
 
     test "complex with multiple ctes" do
@@ -204,9 +202,7 @@ defmodule SQLTest do
         from top_customers tc
         order by tc.spending_rank, tc.month
       ]
-
-      output = to_string(sql)
-      assert output == "with customer_rankings as(select customer_id, sum(amount) as total_spent, rank() over(order by sum(amount) desc) as spending_rank from transactions group by customer_id), top_customers as(select c.customer_id, c.name, cr.total_spent, cr.spending_rank from customer_rankings cr join customers c on c.customer_id = cr.customer_id where cr.spending_rank <= 10) select tc.name, tc.total_spent, tc.spending_rank, case when tc.total_spent > tc.avg_amount * 2 then 'High Value' when tc.total_spent > tc.avg_amount then 'Medium Value' else 'Low Value' end as customer_segment from top_customers tc order by tc.spending_rank, tc.month"
+      assert "with customer_rankings as(select customer_id, sum(amount) as total_spent, rank() over(order by sum(amount) desc) as spending_rank from transactions group by customer_id), top_customers as(select c.customer_id, c.name, cr.total_spent, cr.spending_rank from customer_rankings cr join customers c on c.customer_id = cr.customer_id where cr.spending_rank <= 10) select tc.name, tc.total_spent, tc.spending_rank, case when tc.total_spent > tc.avg_amount * 2 then 'High Value' when tc.total_spent > tc.avg_amount then 'Medium Value' else 'Low Value' end as customer_segment from top_customers tc order by tc.spending_rank, tc.month" == to_string(sql)
     end
   end
 
@@ -357,14 +353,11 @@ defmodule SQLTest do
   end
 
   describe "datatypes" do
-    test "integer" do
+    test "numeric" do
       assert "select 1" == to_string(~SQL[select 1])
       assert "select 1000" == to_string(~SQL[select 1000])
       assert "select -1000" == to_string(~SQL[select -1000])
       assert "select +1000" == to_string(~SQL[select +1000])
-    end
-
-    test "float" do
       assert "select +10.00" == to_string(~SQL[select +10.00])
       assert "select -10.00" == to_string(~SQL[select -10.00])
     end
@@ -375,7 +368,7 @@ defmodule SQLTest do
       assert "select db" == to_string(~SQL[select db])
     end
 
-    test "qouted" do
+    test "quoted" do
       assert "select \"db.users.id\"" == to_string(~SQL[select "db.users.id"])
       assert "select 'db.users'" == to_string(~SQL[select 'db.users'])
       assert "select \"db.users.id\", 'db.users'" == to_string(~SQL[select "db.users.id", 'db.users'])
