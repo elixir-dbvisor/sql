@@ -9,3 +9,4 @@ Application.put_env(:sql, SQL.Repo, username: "postgres", password: "postgres", 
 Mix.Tasks.Ecto.Create.run(["-r", "SQL.Repo"])
 SQL.Repo.start_link()
 import SQL
+alias SQL.BNF

@@ -162,14 +162,11 @@ defmodule SQL.Adapters.TDSTest do
   end
 
   describe "datatypes" do
-    test "integer" do
+    test "numeric" do
       assert "select 1" == to_string(~SQL[select 1])
       assert "select 1000" == to_string(~SQL[select 1000])
       assert "select -1000" == to_string(~SQL[select -1000])
       assert "select +1000" == to_string(~SQL[select +1000])
-    end
-
-    test "float" do
       assert "select +10.00" == to_string(~SQL[select +10.00])
       assert "select -10.00" == to_string(~SQL[select -10.00])
     end

@@ -9,6 +9,7 @@ defmodule SQL do
   @moduledoc since: "0.1.0"
 
   @adapters [SQL.Adapters.ANSI, SQL.Adapters.MySQL, SQL.Adapters.Postgres, SQL.Adapters.TDS]
+  @compile {:inline, cast_params: 4}
 
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
@@ -30,7 +31,7 @@ defmodule SQL do
   @doc deprecated: "Use SQL.Token.token_to_string/1 instead"
   @callback token_to_sql(token :: {atom, keyword, list}) :: String.t()
 
-  defstruct [:tokens, :params, :module, :id, :string, :inspect]
+  defstruct [tokens: [], params: [], module: nil, id: nil, string: nil, inspect: nil]
 
   defimpl Inspect, for: SQL do
     def inspect(sql, _opts), do: Inspect.Algebra.concat(["~SQL\"\"\"\n", sql.inspect, "\n\"\"\""])
@@ -70,29 +71,29 @@ defmodule SQL do
   @doc false
   @doc since: "0.1.0"
   def parse(binary) do
-    {:ok, _opts, _, _, _, _, tokens} = SQL.Lexer.lex(binary, __ENV__.file, 0, [format: true])
+    {:ok, context, tokens} = SQL.Lexer.lex(binary, __ENV__.file, 0, [format: true])
+    {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
     tokens
-    |> SQL.Parser.parse()
-    |> to_query()
+    |> to_query(context)
     |> to_string(SQL.Adapters.ANSI)
   end
 
   @doc false
-  @doc since: "0.1.0"
+  @doc since: "0.3.0"
   @acc ~w[for create drop insert alter with update delete select set fetch from join where group having window except intersect union order limit offset lock colon in declare start grant revoke commit rollback open close comment comments into]a
-  def to_query([value | _] = tokens) when is_tuple(value) and elem(value, 0) in @acc do
-    Enum.reduce(@acc, [], fn key, acc -> acc ++ for {k, meta, v} <- Enum.filter(tokens, &(elem(&1, 0) == key)), do: {k, meta, Enum.map(v, &to_query/1)} end)
+  def to_query([value | _] = tokens, context) when is_tuple(value) and elem(value, 0) in @acc do
+    Enum.reduce(@acc, [], fn key, acc -> acc ++ for {k, meta, v} <- Enum.filter(tokens, &(elem(&1, 0) == key)), do: {k, meta, Enum.map(v, &to_query(&1, context))} end)
   end
-  def to_query({:parens = tag, meta, values}) do
-    {tag, meta, to_query(values)}
+  def to_query({:paren = tag, meta, values}, context) do
+    {tag, meta, to_query(values, context)}
   end
-  def to_query({tag, meta, values}) do
-    {tag, meta, Enum.map(values, &to_query/1)}
+  def to_query({tag, meta, values}, context) do
+    {tag, meta, Enum.map(values, &to_query(&1, context))}
   end
-  def to_query(tokens) when is_list(tokens) do
-    Enum.map(tokens, &to_query/1)
+  def to_query(tokens, context) when is_list(tokens) do
+    Enum.map(tokens, &to_query(&1, context))
   end
-  def to_query(token) do
+  def to_query(token, _context) do
     token
   end
 
@@ -103,7 +104,7 @@ defmodule SQL do
       token, [] = acc -> [acc | module.token_to_string(token)]
       token, acc ->
       case module.token_to_string(token) do
-        <<";", _::binary>> = v -> [acc | v]
+        <<?;, _::binary>> = v -> [acc | v]
         v -> [acc, " " | v]
       end
     end)
@@ -120,7 +121,7 @@ defmodule SQL do
       token, [] = acc -> [acc | fun.(token)]
       token, acc ->
       case fun.(token) do
-        <<";", _::binary>> = v -> [acc | v]
+        <<?;, _::binary>> = v -> [acc | v]
         v -> [acc, " " | v]
       end
     end)
@@ -129,30 +130,30 @@ defmodule SQL do
 
   @doc false
   def build(left, {:<<>>, _, _} = right, _modifiers, env) do
+    module = if env.module, do: Module.get_attribute(env.module, :sql_adapter, SQL.Adapters.ANSI), else: SQL.Adapters.ANSI
     case build(left, right) do
       {:static, data} ->
-        {:ok, opts, _, _, _, _, tokens} = SQL.Lexer.lex(data, env.file)
-        tokens = SQL.to_query(SQL.Parser.parse(tokens))
-        string = if mod = env.module do
-            SQL.to_string(tokens, Module.get_attribute(mod, :sql_adapter))
-            else
-            SQL.to_string(tokens, SQL.Adapters.ANSI)
-        end
-        sql = struct(SQL, tokens: tokens, string: string, module: env.module, inspect: data, id: id(data))
-        quote bind_quoted: [params: opts[:binding], sql: Macro.escape(sql)] do
-            %{sql | params: cast_params(params, [], binding())}
+        {:ok, context, tokens} = SQL.Lexer.lex(data, env.file)
+        {:ok, context, t} = SQL.Parser.parse(tokens, context)
+        sql = struct(SQL, tokens: tokens, string: SQL.to_string(SQL.to_query(t, context), module), module: env.module, inspect: data, id: id(data))
+        case context.binding do
+            [] -> Macro.escape(sql)
+            params ->
+                quote bind_quoted: [params: params, sql: Macro.escape(sql), env: Macro.escape(env)] do
+                    %{sql | params: cast_params(params, [], binding(), env)}
+                end
         end
 
       {:dynamic, data} ->
         sql = struct(SQL, id: id(data), module: env.module)
-        quote bind_quoted: [left: Macro.unpipe(left), right: right, file: env.file, data: data, sql: Macro.escape(sql)] do
+        quote bind_quoted: [left: Macro.unpipe(left), right: right, file: env.file, data: data, sql: Macro.escape(sql), env: Macro.escape(env)] do
           {t, p} = Enum.reduce(left, {[], []}, fn
             {[], 0}, acc   -> acc
             {v, 0}, {t, p} -> {t ++ v.tokens, p ++ v.params}
             end)
-          {tokens, params} = tokens(right, file, length(p), sql.id)
+          {:ok, context, tokens} = tokens(right, file, length(p), sql.id)
           tokens = t ++ tokens
-          %{sql | params: cast_params(params, p, binding()), tokens: tokens, string: plan(tokens, sql.id, sql.module), inspect: plan_inspect(data, sql.id)}
+          %{sql | params: cast_params(context.binding, p, binding(), env), tokens: tokens, string: plan(tokens, context, sql.id, sql.module), inspect: plan_inspect(data, sql.id)}
         end
     end
   end
@@ -184,10 +185,10 @@ defmodule SQL do
   end
 
   @doc false
-  def cast_params(bindings, params, binding) do
+  def cast_params(bindings, params, binding, env) do
     Enum.reduce(bindings, params, fn
-        {:var, var}, acc -> if v = binding[String.to_atom(var)], do: acc ++ [v], else: acc
-        {:code, code}, acc -> acc ++ [elem(Code.eval_string(code, binding), 0)]
+        quoted, acc when is_tuple(quoted) -> acc ++ [elem(Code.eval_quoted_with_env(quoted, binding, env), 0)]
+        quoted, acc -> acc ++ [quoted]
     end)
   end
 
@@ -197,20 +198,20 @@ defmodule SQL do
     if result = :persistent_term.get(key, nil) do
       result
     else
-      {:ok, opts, _, _, _, _, tokens} = SQL.Lexer.lex(binary, file, count)
-      result = {tokens, opts[:binding]}
+      result = SQL.Lexer.lex(binary, file, count)
       :persistent_term.put(key, result)
       result
     end
   end
 
   @doc false
-  def plan(tokens, id, module) do
+  def plan(tokens, context, id, module) do
     key = {module, id, :plan}
     if string = :persistent_term.get(key, nil) do
       string
     else
-      string = to_string(SQL.to_query(SQL.Parser.parse(tokens)), module)
+      {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
+      string = to_string(SQL.to_query(tokens, context), module)
       :persistent_term.put(key, string)
       string
     end
@@ -219,18 +220,20 @@ defmodule SQL do
   @doc false
   def plan_inspect(data, id) do
     key = {id, :inspect}
-    if inspect = :persistent_term.get(key, nil) do
-        inspect
-    else
+    case :persistent_term.get(key, nil) do
+      nil when is_binary(data) ->
+        :persistent_term.put(key, data)
+        data
+      nil ->
         inspect = data
                 |> Enum.map(fn
                 ast when is_struct(ast) -> ast.inspect
                 x -> x
                 end)
                 |> IO.iodata_to_binary()
-
-
         :persistent_term.put(key, inspect)
+        inspect
+      inspect ->
         inspect
     end
   end

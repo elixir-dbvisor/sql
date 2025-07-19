@@ -45,6 +45,7 @@ defmodule SQL.MixProject do
       {:ex_doc, "~> 0.37", only: :dev},
       {:postgrex, ">= 0.0.0", only: [:dev, :test]},
       {:yamerl, ">= 0.0.0", only: [:dev, :test]},
+      {:unicode_set, "~> 1.0"}
     ]
   end
 end
