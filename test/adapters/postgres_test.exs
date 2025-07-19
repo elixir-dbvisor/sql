@@ -175,6 +175,7 @@ defmodule SQL.Adapters.PostgresTest do
       assert "select db.users.id" == to_string(~SQL[select db.users.id])
       assert "select db.users" == to_string(~SQL[select db.users])
       assert "select db" == to_string(~SQL[select db])
+      assert "select _id" == to_string(~SQL[select _id])
     end
 
     test "qouted" do

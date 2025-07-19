@@ -133,7 +133,7 @@ defmodule SQL.Lexer do
   def lex(<<b, _::binary>>=rest, file, params, binding, aliases, line, column, type, data, meta, acc, n) when is_dot(b) do
     update_state(rest, file, params, binding, aliases, line, column, type, data, meta, acc, n, line, column, nil, [], nil)
   end
-  def lex(<<b, rest::binary>>, file, params, binding, aliases, line, column, type, data, meta, acc, n) when type != :ident and Unicode.Set.match?(b, "[[:Lu:], [:Ll:], [:Lt:], [:Lm:], [:Lo:], [:Nl:]]") do
+  def lex(<<b, rest::binary>>, file, params, binding, aliases, line, column, type, data, meta, acc, n) when type != :ident and (Unicode.Set.match?(b, "[[:Lu:], [:Ll:], [:Lt:], [:Lm:], [:Lo:], [:Nl:]]") or b == ?_) do
     update_state(rest, file, params, binding, aliases, line, column, type, data, meta, acc, n, line, column+1, :ident, [[]|[b]], meta)
   end
   def lex(<<b, rest::binary>>, file, params, binding, aliases, line, column, :ident=type, data, meta, acc, n) when Unicode.Set.match?(b, "[[:Mn:], [:Mc:], [:Nd:], [:Pc:], [:Cf:]]") do
