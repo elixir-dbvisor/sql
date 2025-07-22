@@ -8,7 +8,7 @@ defmodule SQL.Token do
   Returns a SQL string for a given token.
   """
   @doc since: "0.2.0"
-  @callback token_to_string(token :: {atom, keyword, list} | {atom, keyword}) :: String.t()
+  @callback token_to_string(token :: {atom, keyword, list}) :: String.t()
 
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do

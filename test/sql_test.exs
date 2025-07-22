@@ -146,28 +146,28 @@ defmodule SQLTest do
     test "complex with" do
       sql = ~SQL[
       with customer_rankings as(
+          from transactions
+          group by customer_id
           select customer_id,
                 sum(amount) as total_spent,
                 rank() over(order by sum(amount) desc) as spending_rank
-          from transactions
-          group by customer_id
       ),
       top_customers as(
+          from customer_rankings cr
+          join customers c on c.customer_id = cr.customer_id
+          where cr.spending_rank <= 10
           select c.customer_id,
                 c.name,
                 cr.total_spent,
                 cr.spending_rank
-          from customer_rankings cr
-          join customers c on c.customer_id = cr.customer_id
-          where cr.spending_rank <= 10
       )
+      from top_customers tc
+      order by tc.spending_rank
       select tc.name,
             tc.total_spent,
             tc.spending_rank
-      from top_customers tc
-      order by tc.spending_rank
       ]
-      assert "with customer_rankings as(select customer_id, sum(amount) as total_spent, rank() over(order by sum(amount) desc) as spending_rank from transactions group by customer_id), top_customers as(select c.customer_id, c.name, cr.total_spent, cr.spending_rank from customer_rankings cr join customers c on c.customer_id = cr.customer_id where cr.spending_rank <= 10) select tc.name, tc.total_spent, tc.spending_rank from top_customers tc order by tc.spending_rank" == to_string(sql)
+      assert "with customer_rankings as (select customer_id, sum(amount) as total_spent, rank() over(order by sum(amount) desc) as spending_rank from transactions group by customer_id), top_customers as (select c.customer_id, c.name, cr.total_spent, cr.spending_rank from customer_rankings cr join customers c on c.customer_id = cr.customer_id where cr.spending_rank <= 10) select tc.name, tc.total_spent, tc.spending_rank from top_customers tc order by tc.spending_rank" == to_string(sql)
     end
 
     test "complex with multiple ctes" do
@@ -202,7 +202,7 @@ defmodule SQLTest do
         from top_customers tc
         order by tc.spending_rank, tc.month
       ]
-      assert "with customer_rankings as(select customer_id, sum(amount) as total_spent, rank() over(order by sum(amount) desc) as spending_rank from transactions group by customer_id), top_customers as(select c.customer_id, c.name, cr.total_spent, cr.spending_rank from customer_rankings cr join customers c on c.customer_id = cr.customer_id where cr.spending_rank <= 10) select tc.name, tc.total_spent, tc.spending_rank, case when tc.total_spent > tc.avg_amount * 2 then 'High Value' when tc.total_spent > tc.avg_amount then 'Medium Value' else 'Low Value' end as customer_segment from top_customers tc order by tc.spending_rank, tc.month" == to_string(sql)
+      assert "with customer_rankings as (select customer_id, sum(amount) as total_spent, rank() over (order by sum(amount) desc) as spending_rank from transactions group by customer_id), top_customers as (select c.customer_id, c.name, cr.total_spent, cr.spending_rank from customer_rankings cr join customers c on c.customer_id = cr.customer_id where cr.spending_rank <= 10) select tc.name, tc.total_spent, tc.spending_rank, case when tc.total_spent > tc.avg_amount * 2 then 'High Value' when tc.total_spent > tc.avg_amount then 'Medium Value' else 'Low Value' end as customer_segment from top_customers tc order by tc.spending_rank, tc.month" == to_string(sql)
     end
   end
 
@@ -463,6 +463,8 @@ defmodule SQLTest do
       assert "where id not between 1 and 2" == to_string(~SQL[where id not between 1 and 2])
       assert "where id between symmetric 1 and 2" == to_string(~SQL[where id between symmetric 1 and 2])
       assert "where id not between symmetric 1 and 2" == to_string(~SQL[where id not between symmetric 1 and 2])
+      assert "where id between asymmetric 1 and 2" == to_string(~SQL[where id between asymmetric 1 and 2])
+      assert "where id not between asymmetric 1 and 2" == to_string(~SQL[where id not between asymmetric 1 and 2])
     end
     test "like" do
       assert "where id like 1" == to_string(~SQL[where id like 1])

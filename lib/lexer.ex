@@ -177,28 +177,13 @@ defmodule SQL.Lexer do
   def update_state(rest, file, params, binding, aliases, _line, _column, nil=_type, _data, _meta, acc, n, l, c, t, d, m) do
     lex(rest, file, params, binding, aliases, l, c, t, d, m, acc, n)
   end
+  def update_state(rest, file, params, binding, aliases, line, column, :colon=type, []=_data, meta, acc, n, l, c, t, d, m) do
+    lex(rest, file, params, binding, aliases, l, c, t, d, m, [node(type, line, column, acc, meta, file)], n)
+  end
   def update_state(rest, file, params, binding, aliases, line, column, :ident=type, data, meta, [{:as=tt, mm, []=aa}, {:ident, _, a}=right|acc]=ac, n, l, c, t, d, m) do
     case node(type, line, column, data, meta, file) do
       {:ident, _, as} = node -> lex(rest, file, params, binding, [{as, a}|aliases], l, c, t, d, m, [{tt, mm, [right, node|aa]}|acc], n)
       node -> lex(rest, file, params, binding, aliases, l, c, t, d, m, [node|ac], n)
-    end
-  end
-  def update_state(rest, file, params, binding, aliases, line, column, :ident=type, data, meta, [{:outer, _, []}=p, {tag, _, []}=p1, {:natural, _, []}=p2|acc], n, l, c, t, d, m) when tag in ~w[left right full]a do
-    {tt, mm, aa} = node(type, line, column, data, meta, file)
-    lex(rest, file, params, binding, aliases, l, c, t, d, m, [{tt, mm, [p2, p1, p|aa]} | acc], n)
-  end
-  def update_state(rest, file, params, binding, aliases, line, column, :ident=type, data, meta, [{:outer, _, []}=p, {tag, _, []}=p1|acc], n, l, c, t, d, m) when tag in ~w[left right full]a do
-    {tt, mm, aa} = node(type, line, column, data, meta, file)
-    lex(rest, file, params, binding, aliases, l, c, t, d, m, [{tt, mm, [p1, p|aa]} | acc], n)
-  end
-  def update_state(rest, file, params, binding, aliases, line, column, :ident=type, data, meta, [{:inner, _, []}=p, {:natural, _, []}=p1|acc], n, l, c, t, d, m) do
-    {tt, mm, aa} = node(type, line, column, data, meta, file)
-    lex(rest, file, params, binding, aliases, l, c, t, d, m, [{tt, mm, [p1, p|aa]} | acc], n)
-  end
-  def update_state(rest, file, params, binding, aliases, line, column, :ident=type, data, meta, [{tag, _, []}=p|acc], n, l, c, t, d, m) when tag in ~w[inner left right full natural cross]a do
-    case node(type, line, column, data, meta, file) do
-      {:join=tt, mm, aa} -> lex(rest, file, params, binding, aliases, l, c, t, d, m, [{tt, mm, [p|aa]}|acc], n)
-      node -> lex(rest, file, params, binding, aliases, l, c, t, d, m, [node, p|acc], n)
     end
   end
   def update_state(rest, file, params, binding, aliases, line, column, type, data, meta, [{:dot=t2, m2, []=a}, {tag, _, _}=right|acc], n, l, c, t, d, m) when (type in ~w[ident double_quote bracket dot]a or data==[[], ?*]) and tag in ~w[ident double_quote bracket dot]a do

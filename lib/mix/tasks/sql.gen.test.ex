@@ -28,7 +28,6 @@ defmodule Mix.Tasks.Sql.Gen.Test do
     |> String.replace(~r{\(\s+'}, &String.replace(&1, " ", ""))
     |> String.replace(~r{\(\s+"}, &String.replace(&1, " ", ""))
     |> String.replace(~r{\(\s+\*}, &String.replace(&1, " ", ""))
-    |> String.replace(~r{[[:alpha:]]+\s+\(}, &String.replace(&1, " ", ""))
     |> String.replace(~r{\b\s+\,}, &String.replace(&1, " ", ""))
     |> String.replace(~r{\)\s+\,}, &String.replace(&1, " ", ""))
     |> String.replace(~r{\'\s+\,}, &String.replace(&1, " ", ""))
