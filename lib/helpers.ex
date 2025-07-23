@@ -7,1362 +7,68 @@ defmodule SQL.Helpers do
   defguard is_newline(b) when b in [10, 11, 12, 13, 133, 8232, 8233]
   defguard is_space(b) when b in ~c" "
   defguard is_whitespace(b) when b in [9, 13, 160, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8239, 8287, 12288, 6158, 8203, 8204, 8205, 8288, 65279]
-  defguard is_literal(b) when b in ~c{"'`}
+  defguard is_literal(b) when b == ?" or b == ?' or b == ?`
   defguard is_expr(b) when b in [:paren, :bracket, :brace]
   defguard is_nested_start(b) when b in ~c"([{"
   defguard is_nested_end(b) when b in ~c")]}"
-  defguard is_special_character(b) when b in ~c" \"%&'()*+,-./:;<=>?[]^_|{}$'*@,$!>[(<-%.+?])/~#*/"
+  defguard is_special_character(b) when b in ~c" \"%&'()*+,-./:;<=>?[]^_|{}$@!~#"
   defguard is_digit(b) when b in ~c"0123456789"
   defguard is_comment(b) when b in ["--", "/*"]
-  defguard is_sign(b) when b in ~c"-+"
+  defguard is_sign(b) when b == ?- or b == ?+
   defguard is_dot(b) when b == ?.
-  defguard is_delimiter(b) when b in ~c";,"
-  defguard is_operator(node) when elem(node, 0) in ~w"^-= <=> ->> ||/ !~* <<| |>> &<| |&> ?-| ?|| <<= >>= #>> -|- && || &= ^= |= |*= >> << -> := += -= *= /= %= !> !< @> <@ |/ ^@ ~* !~ ## &< &> <^ >^ ?# ?- ?| ~= @@ !! #> ?& #- @? :: <> >= <= != + - ! & ^ | ~ % @ # * / = > <"a
+  defguard is_delimiter(b) when b == ?; or b == ?,
   
-  defguard is_a(b) when b in ~c"aA"
+  defguard is_a(b) when b == 97 or b == 65
   
-  defguard is_b(b) when b in ~c"bB"
+  defguard is_b(b) when b == 98 or b == 66
   
-  defguard is_c(b) when b in ~c"cC"
+  defguard is_c(b) when b == 99 or b == 67
   
-  defguard is_d(b) when b in ~c"dD"
+  defguard is_d(b) when b == 100 or b == 68
   
-  defguard is_e(b) when b in ~c"eE"
+  defguard is_e(b) when b == 101 or b == 69
   
-  defguard is_f(b) when b in ~c"fF"
+  defguard is_f(b) when b == 102 or b == 70
   
-  defguard is_g(b) when b in ~c"gG"
+  defguard is_g(b) when b == 103 or b == 71
   
-  defguard is_h(b) when b in ~c"hH"
+  defguard is_h(b) when b == 104 or b == 72
   
-  defguard is_i(b) when b in ~c"iI"
+  defguard is_i(b) when b == 105 or b == 73
   
-  defguard is_j(b) when b in ~c"jJ"
+  defguard is_j(b) when b == 106 or b == 74
   
-  defguard is_k(b) when b in ~c"kK"
+  defguard is_k(b) when b == 107 or b == 75
   
-  defguard is_l(b) when b in ~c"lL"
+  defguard is_l(b) when b == 108 or b == 76
   
-  defguard is_m(b) when b in ~c"mM"
+  defguard is_m(b) when b == 109 or b == 77
   
-  defguard is_n(b) when b in ~c"nN"
+  defguard is_n(b) when b == 110 or b == 78
   
-  defguard is_o(b) when b in ~c"oO"
+  defguard is_o(b) when b == 111 or b == 79
   
-  defguard is_p(b) when b in ~c"pP"
+  defguard is_p(b) when b == 112 or b == 80
   
-  defguard is_q(b) when b in ~c"qQ"
+  defguard is_q(b) when b == 113 or b == 81
   
-  defguard is_r(b) when b in ~c"rR"
+  defguard is_r(b) when b == 114 or b == 82
   
-  defguard is_s(b) when b in ~c"sS"
+  defguard is_s(b) when b == 115 or b == 83
   
-  defguard is_t(b) when b in ~c"tT"
+  defguard is_t(b) when b == 116 or b == 84
   
-  defguard is_u(b) when b in ~c"uU"
+  defguard is_u(b) when b == 117 or b == 85
   
-  defguard is_v(b) when b in ~c"vV"
+  defguard is_v(b) when b == 118 or b == 86
   
-  defguard is_w(b) when b in ~c"wW"
+  defguard is_w(b) when b == 119 or b == 87
   
-  defguard is_x(b) when b in ~c"xX"
+  defguard is_x(b) when b == 120 or b == 88
   
-  defguard is_y(b) when b in ~c"yY"
+  defguard is_y(b) when b == 121 or b == 89
   
-  defguard is_z(b) when b in ~c"zZ"
-  
-  
-  defguard is_kw_abs(node) when elem(hd(elem(node, 1)), 1) == :abs
-  
-  defguard is_kw_absent(node) when elem(hd(elem(node, 1)), 1) == :absent
-  
-  defguard is_kw_acos(node) when elem(hd(elem(node, 1)), 1) == :acos
-  
-  defguard is_kw_all(node) when elem(hd(elem(node, 1)), 1) == :all
-  
-  defguard is_kw_allocate(node) when elem(hd(elem(node, 1)), 1) == :allocate
-  
-  defguard is_kw_alter(node) when elem(hd(elem(node, 1)), 1) == :alter
-  
-  defguard is_kw_and(node) when elem(hd(elem(node, 1)), 1) == :and
-  
-  defguard is_kw_any(node) when elem(hd(elem(node, 1)), 1) == :any
-  
-  defguard is_kw_any_value(node) when elem(hd(elem(node, 1)), 1) == :any_value
-  
-  defguard is_kw_are(node) when elem(hd(elem(node, 1)), 1) == :are
-  
-  defguard is_kw_array(node) when elem(hd(elem(node, 1)), 1) == :array
-  
-  defguard is_kw_array_agg(node) when elem(hd(elem(node, 1)), 1) == :array_agg
-  
-  defguard is_kw_array_max_cardinality(node) when elem(hd(elem(node, 1)), 1) == :array_max_cardinality
-  
-  defguard is_kw_as(node) when elem(hd(elem(node, 1)), 1) == :as
-  
-  defguard is_kw_asensitive(node) when elem(hd(elem(node, 1)), 1) == :asensitive
-  
-  defguard is_kw_asin(node) when elem(hd(elem(node, 1)), 1) == :asin
-  
-  defguard is_kw_asymmetric(node) when elem(hd(elem(node, 1)), 1) == :asymmetric
-  
-  defguard is_kw_at(node) when elem(hd(elem(node, 1)), 1) == :at
-  
-  defguard is_kw_atan(node) when elem(hd(elem(node, 1)), 1) == :atan
-  
-  defguard is_kw_atomic(node) when elem(hd(elem(node, 1)), 1) == :atomic
-  
-  defguard is_kw_authorization(node) when elem(hd(elem(node, 1)), 1) == :authorization
-  
-  defguard is_kw_avg(node) when elem(hd(elem(node, 1)), 1) == :avg
-  
-  defguard is_kw_begin(node) when elem(hd(elem(node, 1)), 1) == :begin
-  
-  defguard is_kw_begin_frame(node) when elem(hd(elem(node, 1)), 1) == :begin_frame
-  
-  defguard is_kw_begin_partition(node) when elem(hd(elem(node, 1)), 1) == :begin_partition
-  
-  defguard is_kw_between(node) when elem(hd(elem(node, 1)), 1) == :between
-  
-  defguard is_kw_bigint(node) when elem(hd(elem(node, 1)), 1) == :bigint
-  
-  defguard is_kw_binary(node) when elem(hd(elem(node, 1)), 1) == :binary
-  
-  defguard is_kw_blob(node) when elem(hd(elem(node, 1)), 1) == :blob
-  
-  defguard is_kw_boolean(node) when elem(hd(elem(node, 1)), 1) == :boolean
-  
-  defguard is_kw_both(node) when elem(hd(elem(node, 1)), 1) == :both
-  
-  defguard is_kw_btrim(node) when elem(hd(elem(node, 1)), 1) == :btrim
-  
-  defguard is_kw_by(node) when elem(hd(elem(node, 1)), 1) == :by
-  
-  defguard is_kw_call(node) when elem(hd(elem(node, 1)), 1) == :call
-  
-  defguard is_kw_called(node) when elem(hd(elem(node, 1)), 1) == :called
-  
-  defguard is_kw_cardinality(node) when elem(hd(elem(node, 1)), 1) == :cardinality
-  
-  defguard is_kw_cascaded(node) when elem(hd(elem(node, 1)), 1) == :cascaded
-  
-  defguard is_kw_case(node) when elem(hd(elem(node, 1)), 1) == :case
-  
-  defguard is_kw_cast(node) when elem(hd(elem(node, 1)), 1) == :cast
-  
-  defguard is_kw_ceil(node) when elem(hd(elem(node, 1)), 1) == :ceil
-  
-  defguard is_kw_ceiling(node) when elem(hd(elem(node, 1)), 1) == :ceiling
-  
-  defguard is_kw_char(node) when elem(hd(elem(node, 1)), 1) == :char
-  
-  defguard is_kw_char_length(node) when elem(hd(elem(node, 1)), 1) == :char_length
-  
-  defguard is_kw_character(node) when elem(hd(elem(node, 1)), 1) == :character
-  
-  defguard is_kw_character_length(node) when elem(hd(elem(node, 1)), 1) == :character_length
-  
-  defguard is_kw_check(node) when elem(hd(elem(node, 1)), 1) == :check
-  
-  defguard is_kw_classifier(node) when elem(hd(elem(node, 1)), 1) == :classifier
-  
-  defguard is_kw_clob(node) when elem(hd(elem(node, 1)), 1) == :clob
-  
-  defguard is_kw_close(node) when elem(hd(elem(node, 1)), 1) == :close
-  
-  defguard is_kw_coalesce(node) when elem(hd(elem(node, 1)), 1) == :coalesce
-  
-  defguard is_kw_collate(node) when elem(hd(elem(node, 1)), 1) == :collate
-  
-  defguard is_kw_collect(node) when elem(hd(elem(node, 1)), 1) == :collect
-  
-  defguard is_kw_column(node) when elem(hd(elem(node, 1)), 1) == :column
-  
-  defguard is_kw_commit(node) when elem(hd(elem(node, 1)), 1) == :commit
-  
-  defguard is_kw_condition(node) when elem(hd(elem(node, 1)), 1) == :condition
-  
-  defguard is_kw_connect(node) when elem(hd(elem(node, 1)), 1) == :connect
-  
-  defguard is_kw_constraint(node) when elem(hd(elem(node, 1)), 1) == :constraint
-  
-  defguard is_kw_contains(node) when elem(hd(elem(node, 1)), 1) == :contains
-  
-  defguard is_kw_convert(node) when elem(hd(elem(node, 1)), 1) == :convert
-  
-  defguard is_kw_copy(node) when elem(hd(elem(node, 1)), 1) == :copy
-  
-  defguard is_kw_corr(node) when elem(hd(elem(node, 1)), 1) == :corr
-  
-  defguard is_kw_corresponding(node) when elem(hd(elem(node, 1)), 1) == :corresponding
-  
-  defguard is_kw_cos(node) when elem(hd(elem(node, 1)), 1) == :cos
-  
-  defguard is_kw_cosh(node) when elem(hd(elem(node, 1)), 1) == :cosh
-  
-  defguard is_kw_count(node) when elem(hd(elem(node, 1)), 1) == :count
-  
-  defguard is_kw_covar_pop(node) when elem(hd(elem(node, 1)), 1) == :covar_pop
-  
-  defguard is_kw_covar_samp(node) when elem(hd(elem(node, 1)), 1) == :covar_samp
-  
-  defguard is_kw_create(node) when elem(hd(elem(node, 1)), 1) == :create
-  
-  defguard is_kw_cross(node) when elem(hd(elem(node, 1)), 1) == :cross
-  
-  defguard is_kw_cube(node) when elem(hd(elem(node, 1)), 1) == :cube
-  
-  defguard is_kw_cume_dist(node) when elem(hd(elem(node, 1)), 1) == :cume_dist
-  
-  defguard is_kw_current(node) when elem(hd(elem(node, 1)), 1) == :current
-  
-  defguard is_kw_current_catalog(node) when elem(hd(elem(node, 1)), 1) == :current_catalog
-  
-  defguard is_kw_current_date(node) when elem(hd(elem(node, 1)), 1) == :current_date
-  
-  defguard is_kw_current_default_transform_group(node) when elem(hd(elem(node, 1)), 1) == :current_default_transform_group
-  
-  defguard is_kw_current_path(node) when elem(hd(elem(node, 1)), 1) == :current_path
-  
-  defguard is_kw_current_role(node) when elem(hd(elem(node, 1)), 1) == :current_role
-  
-  defguard is_kw_current_row(node) when elem(hd(elem(node, 1)), 1) == :current_row
-  
-  defguard is_kw_current_schema(node) when elem(hd(elem(node, 1)), 1) == :current_schema
-  
-  defguard is_kw_current_time(node) when elem(hd(elem(node, 1)), 1) == :current_time
-  
-  defguard is_kw_current_timestamp(node) when elem(hd(elem(node, 1)), 1) == :current_timestamp
-  
-  defguard is_kw_current_transform_group_for_type(node) when elem(hd(elem(node, 1)), 1) == :current_transform_group_for_type
-  
-  defguard is_kw_current_user(node) when elem(hd(elem(node, 1)), 1) == :current_user
-  
-  defguard is_kw_cursor(node) when elem(hd(elem(node, 1)), 1) == :cursor
-  
-  defguard is_kw_cycle(node) when elem(hd(elem(node, 1)), 1) == :cycle
-  
-  defguard is_kw_date(node) when elem(hd(elem(node, 1)), 1) == :date
-  
-  defguard is_kw_day(node) when elem(hd(elem(node, 1)), 1) == :day
-  
-  defguard is_kw_deallocate(node) when elem(hd(elem(node, 1)), 1) == :deallocate
-  
-  defguard is_kw_dec(node) when elem(hd(elem(node, 1)), 1) == :dec
-  
-  defguard is_kw_decfloat(node) when elem(hd(elem(node, 1)), 1) == :decfloat
-  
-  defguard is_kw_decimal(node) when elem(hd(elem(node, 1)), 1) == :decimal
-  
-  defguard is_kw_declare(node) when elem(hd(elem(node, 1)), 1) == :declare
-  
-  defguard is_kw_default(node) when elem(hd(elem(node, 1)), 1) == :default
-  
-  defguard is_kw_define(node) when elem(hd(elem(node, 1)), 1) == :define
-  
-  defguard is_kw_delete(node) when elem(hd(elem(node, 1)), 1) == :delete
-  
-  defguard is_kw_dense_rank(node) when elem(hd(elem(node, 1)), 1) == :dense_rank
-  
-  defguard is_kw_deref(node) when elem(hd(elem(node, 1)), 1) == :deref
-  
-  defguard is_kw_describe(node) when elem(hd(elem(node, 1)), 1) == :describe
-  
-  defguard is_kw_deterministic(node) when elem(hd(elem(node, 1)), 1) == :deterministic
-  
-  defguard is_kw_disconnect(node) when elem(hd(elem(node, 1)), 1) == :disconnect
-  
-  defguard is_kw_distinct(node) when elem(hd(elem(node, 1)), 1) == :distinct
-  
-  defguard is_kw_double(node) when elem(hd(elem(node, 1)), 1) == :double
-  
-  defguard is_kw_drop(node) when elem(hd(elem(node, 1)), 1) == :drop
-  
-  defguard is_kw_dynamic(node) when elem(hd(elem(node, 1)), 1) == :dynamic
-  
-  defguard is_kw_each(node) when elem(hd(elem(node, 1)), 1) == :each
-  
-  defguard is_kw_element(node) when elem(hd(elem(node, 1)), 1) == :element
-  
-  defguard is_kw_else(node) when elem(hd(elem(node, 1)), 1) == :else
-  
-  defguard is_kw_empty(node) when elem(hd(elem(node, 1)), 1) == :empty
-  
-  defguard is_kw_end(node) when elem(hd(elem(node, 1)), 1) == :end
-  
-  defguard is_kw_end_frame(node) when elem(hd(elem(node, 1)), 1) == :end_frame
-  
-  defguard is_kw_end_partition(node) when elem(hd(elem(node, 1)), 1) == :end_partition
-  
-  defguard is_kw_end_exec(node) when elem(hd(elem(node, 1)), 1) == :"end-exec"
-  
-  defguard is_kw_equals(node) when elem(hd(elem(node, 1)), 1) == :equals
-  
-  defguard is_kw_escape(node) when elem(hd(elem(node, 1)), 1) == :escape
-  
-  defguard is_kw_every(node) when elem(hd(elem(node, 1)), 1) == :every
-  
-  defguard is_kw_except(node) when elem(hd(elem(node, 1)), 1) == :except
-  
-  defguard is_kw_exec(node) when elem(hd(elem(node, 1)), 1) == :exec
-  
-  defguard is_kw_execute(node) when elem(hd(elem(node, 1)), 1) == :execute
-  
-  defguard is_kw_exists(node) when elem(hd(elem(node, 1)), 1) == :exists
-  
-  defguard is_kw_exp(node) when elem(hd(elem(node, 1)), 1) == :exp
-  
-  defguard is_kw_external(node) when elem(hd(elem(node, 1)), 1) == :external
-  
-  defguard is_kw_extract(node) when elem(hd(elem(node, 1)), 1) == :extract
-  
-  defguard is_kw_false(node) when elem(hd(elem(node, 1)), 1) == false
-  
-  defguard is_kw_fetch(node) when elem(hd(elem(node, 1)), 1) == :fetch
-  
-  defguard is_kw_filter(node) when elem(hd(elem(node, 1)), 1) == :filter
-  
-  defguard is_kw_first_value(node) when elem(hd(elem(node, 1)), 1) == :first_value
-  
-  defguard is_kw_float(node) when elem(hd(elem(node, 1)), 1) == :float
-  
-  defguard is_kw_floor(node) when elem(hd(elem(node, 1)), 1) == :floor
-  
-  defguard is_kw_for(node) when elem(hd(elem(node, 1)), 1) == :for
-  
-  defguard is_kw_foreign(node) when elem(hd(elem(node, 1)), 1) == :foreign
-  
-  defguard is_kw_frame_row(node) when elem(hd(elem(node, 1)), 1) == :frame_row
-  
-  defguard is_kw_free(node) when elem(hd(elem(node, 1)), 1) == :free
-  
-  defguard is_kw_from(node) when elem(hd(elem(node, 1)), 1) == :from
-  
-  defguard is_kw_full(node) when elem(hd(elem(node, 1)), 1) == :full
-  
-  defguard is_kw_function(node) when elem(hd(elem(node, 1)), 1) == :function
-  
-  defguard is_kw_fusion(node) when elem(hd(elem(node, 1)), 1) == :fusion
-  
-  defguard is_kw_get(node) when elem(hd(elem(node, 1)), 1) == :get
-  
-  defguard is_kw_global(node) when elem(hd(elem(node, 1)), 1) == :global
-  
-  defguard is_kw_grant(node) when elem(hd(elem(node, 1)), 1) == :grant
-  
-  defguard is_kw_greatest(node) when elem(hd(elem(node, 1)), 1) == :greatest
-  
-  defguard is_kw_group(node) when elem(hd(elem(node, 1)), 1) == :group
-  
-  defguard is_kw_grouping(node) when elem(hd(elem(node, 1)), 1) == :grouping
-  
-  defguard is_kw_groups(node) when elem(hd(elem(node, 1)), 1) == :groups
-  
-  defguard is_kw_having(node) when elem(hd(elem(node, 1)), 1) == :having
-  
-  defguard is_kw_hold(node) when elem(hd(elem(node, 1)), 1) == :hold
-  
-  defguard is_kw_hour(node) when elem(hd(elem(node, 1)), 1) == :hour
-  
-  defguard is_kw_identity(node) when elem(hd(elem(node, 1)), 1) == :identity
-  
-  defguard is_kw_in(node) when elem(hd(elem(node, 1)), 1) == :in
-  
-  defguard is_kw_indicator(node) when elem(hd(elem(node, 1)), 1) == :indicator
-  
-  defguard is_kw_initial(node) when elem(hd(elem(node, 1)), 1) == :initial
-  
-  defguard is_kw_inner(node) when elem(hd(elem(node, 1)), 1) == :inner
-  
-  defguard is_kw_inout(node) when elem(hd(elem(node, 1)), 1) == :inout
-  
-  defguard is_kw_insensitive(node) when elem(hd(elem(node, 1)), 1) == :insensitive
-  
-  defguard is_kw_insert(node) when elem(hd(elem(node, 1)), 1) == :insert
-  
-  defguard is_kw_int(node) when elem(hd(elem(node, 1)), 1) == :int
-  
-  defguard is_kw_integer(node) when elem(hd(elem(node, 1)), 1) == :integer
-  
-  defguard is_kw_intersect(node) when elem(hd(elem(node, 1)), 1) == :intersect
-  
-  defguard is_kw_intersection(node) when elem(hd(elem(node, 1)), 1) == :intersection
-  
-  defguard is_kw_interval(node) when elem(hd(elem(node, 1)), 1) == :interval
-  
-  defguard is_kw_into(node) when elem(hd(elem(node, 1)), 1) == :into
-  
-  defguard is_kw_is(node) when elem(hd(elem(node, 1)), 1) == :is
-  
-  defguard is_kw_join(node) when elem(hd(elem(node, 1)), 1) == :join
-  
-  defguard is_kw_json(node) when elem(hd(elem(node, 1)), 1) == :json
-  
-  defguard is_kw_json_array(node) when elem(hd(elem(node, 1)), 1) == :json_array
-  
-  defguard is_kw_json_arrayagg(node) when elem(hd(elem(node, 1)), 1) == :json_arrayagg
-  
-  defguard is_kw_json_exists(node) when elem(hd(elem(node, 1)), 1) == :json_exists
-  
-  defguard is_kw_json_object(node) when elem(hd(elem(node, 1)), 1) == :json_object
-  
-  defguard is_kw_json_objectagg(node) when elem(hd(elem(node, 1)), 1) == :json_objectagg
-  
-  defguard is_kw_json_query(node) when elem(hd(elem(node, 1)), 1) == :json_query
-  
-  defguard is_kw_json_scalar(node) when elem(hd(elem(node, 1)), 1) == :json_scalar
-  
-  defguard is_kw_json_serialize(node) when elem(hd(elem(node, 1)), 1) == :json_serialize
-  
-  defguard is_kw_json_table(node) when elem(hd(elem(node, 1)), 1) == :json_table
-  
-  defguard is_kw_json_table_primitive(node) when elem(hd(elem(node, 1)), 1) == :json_table_primitive
-  
-  defguard is_kw_json_value(node) when elem(hd(elem(node, 1)), 1) == :json_value
-  
-  defguard is_kw_lag(node) when elem(hd(elem(node, 1)), 1) == :lag
-  
-  defguard is_kw_language(node) when elem(hd(elem(node, 1)), 1) == :language
-  
-  defguard is_kw_large(node) when elem(hd(elem(node, 1)), 1) == :large
-  
-  defguard is_kw_last_value(node) when elem(hd(elem(node, 1)), 1) == :last_value
-  
-  defguard is_kw_lateral(node) when elem(hd(elem(node, 1)), 1) == :lateral
-  
-  defguard is_kw_lead(node) when elem(hd(elem(node, 1)), 1) == :lead
-  
-  defguard is_kw_leading(node) when elem(hd(elem(node, 1)), 1) == :leading
-  
-  defguard is_kw_least(node) when elem(hd(elem(node, 1)), 1) == :least
-  
-  defguard is_kw_left(node) when elem(hd(elem(node, 1)), 1) == :left
-  
-  defguard is_kw_like(node) when elem(hd(elem(node, 1)), 1) == :like
-  
-  defguard is_kw_like_regex(node) when elem(hd(elem(node, 1)), 1) == :like_regex
-  
-  defguard is_kw_listagg(node) when elem(hd(elem(node, 1)), 1) == :listagg
-  
-  defguard is_kw_ln(node) when elem(hd(elem(node, 1)), 1) == :ln
-  
-  defguard is_kw_local(node) when elem(hd(elem(node, 1)), 1) == :local
-  
-  defguard is_kw_localtime(node) when elem(hd(elem(node, 1)), 1) == :localtime
-  
-  defguard is_kw_localtimestamp(node) when elem(hd(elem(node, 1)), 1) == :localtimestamp
-  
-  defguard is_kw_log(node) when elem(hd(elem(node, 1)), 1) == :log
-  
-  defguard is_kw_log10(node) when elem(hd(elem(node, 1)), 1) == :log10
-  
-  defguard is_kw_lower(node) when elem(hd(elem(node, 1)), 1) == :lower
-  
-  defguard is_kw_lpad(node) when elem(hd(elem(node, 1)), 1) == :lpad
-  
-  defguard is_kw_ltrim(node) when elem(hd(elem(node, 1)), 1) == :ltrim
-  
-  defguard is_kw_match(node) when elem(hd(elem(node, 1)), 1) == :match
-  
-  defguard is_kw_match_number(node) when elem(hd(elem(node, 1)), 1) == :match_number
-  
-  defguard is_kw_match_recognize(node) when elem(hd(elem(node, 1)), 1) == :match_recognize
-  
-  defguard is_kw_matches(node) when elem(hd(elem(node, 1)), 1) == :matches
-  
-  defguard is_kw_max(node) when elem(hd(elem(node, 1)), 1) == :max
-  
-  defguard is_kw_member(node) when elem(hd(elem(node, 1)), 1) == :member
-  
-  defguard is_kw_merge(node) when elem(hd(elem(node, 1)), 1) == :merge
-  
-  defguard is_kw_method(node) when elem(hd(elem(node, 1)), 1) == :method
-  
-  defguard is_kw_min(node) when elem(hd(elem(node, 1)), 1) == :min
-  
-  defguard is_kw_minute(node) when elem(hd(elem(node, 1)), 1) == :minute
-  
-  defguard is_kw_mod(node) when elem(hd(elem(node, 1)), 1) == :mod
-  
-  defguard is_kw_modifies(node) when elem(hd(elem(node, 1)), 1) == :modifies
-  
-  defguard is_kw_module(node) when elem(hd(elem(node, 1)), 1) == :module
-  
-  defguard is_kw_month(node) when elem(hd(elem(node, 1)), 1) == :month
-  
-  defguard is_kw_multiset(node) when elem(hd(elem(node, 1)), 1) == :multiset
-  
-  defguard is_kw_national(node) when elem(hd(elem(node, 1)), 1) == :national
-  
-  defguard is_kw_natural(node) when elem(hd(elem(node, 1)), 1) == :natural
-  
-  defguard is_kw_nchar(node) when elem(hd(elem(node, 1)), 1) == :nchar
-  
-  defguard is_kw_nclob(node) when elem(hd(elem(node, 1)), 1) == :nclob
-  
-  defguard is_kw_new(node) when elem(hd(elem(node, 1)), 1) == :new
-  
-  defguard is_kw_no(node) when elem(hd(elem(node, 1)), 1) == :no
-  
-  defguard is_kw_none(node) when elem(hd(elem(node, 1)), 1) == :none
-  
-  defguard is_kw_normalize(node) when elem(hd(elem(node, 1)), 1) == :normalize
-  
-  defguard is_kw_not(node) when elem(hd(elem(node, 1)), 1) == :not
-  
-  defguard is_kw_nth_value(node) when elem(hd(elem(node, 1)), 1) == :nth_value
-  
-  defguard is_kw_ntile(node) when elem(hd(elem(node, 1)), 1) == :ntile
-  
-  defguard is_kw_null(node) when elem(hd(elem(node, 1)), 1) == :null
-  
-  defguard is_kw_nullif(node) when elem(hd(elem(node, 1)), 1) == :nullif
-  
-  defguard is_kw_numeric(node) when elem(hd(elem(node, 1)), 1) == :numeric
-  
-  defguard is_kw_occurrences_regex(node) when elem(hd(elem(node, 1)), 1) == :occurrences_regex
-  
-  defguard is_kw_octet_length(node) when elem(hd(elem(node, 1)), 1) == :octet_length
-  
-  defguard is_kw_of(node) when elem(hd(elem(node, 1)), 1) == :of
-  
-  defguard is_kw_offset(node) when elem(hd(elem(node, 1)), 1) == :offset
-  
-  defguard is_kw_old(node) when elem(hd(elem(node, 1)), 1) == :old
-  
-  defguard is_kw_omit(node) when elem(hd(elem(node, 1)), 1) == :omit
-  
-  defguard is_kw_on(node) when elem(hd(elem(node, 1)), 1) == :on
-  
-  defguard is_kw_one(node) when elem(hd(elem(node, 1)), 1) == :one
-  
-  defguard is_kw_only(node) when elem(hd(elem(node, 1)), 1) == :only
-  
-  defguard is_kw_open(node) when elem(hd(elem(node, 1)), 1) == :open
-  
-  defguard is_kw_or(node) when elem(hd(elem(node, 1)), 1) == :or
-  
-  defguard is_kw_order(node) when elem(hd(elem(node, 1)), 1) == :order
-  
-  defguard is_kw_out(node) when elem(hd(elem(node, 1)), 1) == :out
-  
-  defguard is_kw_outer(node) when elem(hd(elem(node, 1)), 1) == :outer
-  
-  defguard is_kw_over(node) when elem(hd(elem(node, 1)), 1) == :over
-  
-  defguard is_kw_overlaps(node) when elem(hd(elem(node, 1)), 1) == :overlaps
-  
-  defguard is_kw_overlay(node) when elem(hd(elem(node, 1)), 1) == :overlay
-  
-  defguard is_kw_parameter(node) when elem(hd(elem(node, 1)), 1) == :parameter
-  
-  defguard is_kw_partition(node) when elem(hd(elem(node, 1)), 1) == :partition
-  
-  defguard is_kw_pattern(node) when elem(hd(elem(node, 1)), 1) == :pattern
-  
-  defguard is_kw_per(node) when elem(hd(elem(node, 1)), 1) == :per
-  
-  defguard is_kw_percent(node) when elem(hd(elem(node, 1)), 1) == :percent
-  
-  defguard is_kw_percent_rank(node) when elem(hd(elem(node, 1)), 1) == :percent_rank
-  
-  defguard is_kw_percentile_cont(node) when elem(hd(elem(node, 1)), 1) == :percentile_cont
-  
-  defguard is_kw_percentile_disc(node) when elem(hd(elem(node, 1)), 1) == :percentile_disc
-  
-  defguard is_kw_period(node) when elem(hd(elem(node, 1)), 1) == :period
-  
-  defguard is_kw_portion(node) when elem(hd(elem(node, 1)), 1) == :portion
-  
-  defguard is_kw_position(node) when elem(hd(elem(node, 1)), 1) == :position
-  
-  defguard is_kw_position_regex(node) when elem(hd(elem(node, 1)), 1) == :position_regex
-  
-  defguard is_kw_power(node) when elem(hd(elem(node, 1)), 1) == :power
-  
-  defguard is_kw_precedes(node) when elem(hd(elem(node, 1)), 1) == :precedes
-  
-  defguard is_kw_precision(node) when elem(hd(elem(node, 1)), 1) == :precision
-  
-  defguard is_kw_prepare(node) when elem(hd(elem(node, 1)), 1) == :prepare
-  
-  defguard is_kw_primary(node) when elem(hd(elem(node, 1)), 1) == :primary
-  
-  defguard is_kw_procedure(node) when elem(hd(elem(node, 1)), 1) == :procedure
-  
-  defguard is_kw_ptf(node) when elem(hd(elem(node, 1)), 1) == :ptf
-  
-  defguard is_kw_range(node) when elem(hd(elem(node, 1)), 1) == :range
-  
-  defguard is_kw_rank(node) when elem(hd(elem(node, 1)), 1) == :rank
-  
-  defguard is_kw_reads(node) when elem(hd(elem(node, 1)), 1) == :reads
-  
-  defguard is_kw_real(node) when elem(hd(elem(node, 1)), 1) == :real
-  
-  defguard is_kw_recursive(node) when elem(hd(elem(node, 1)), 1) == :recursive
-  
-  defguard is_kw_ref(node) when elem(hd(elem(node, 1)), 1) == :ref
-  
-  defguard is_kw_references(node) when elem(hd(elem(node, 1)), 1) == :references
-  
-  defguard is_kw_referencing(node) when elem(hd(elem(node, 1)), 1) == :referencing
-  
-  defguard is_kw_regr_avgx(node) when elem(hd(elem(node, 1)), 1) == :regr_avgx
-  
-  defguard is_kw_regr_avgy(node) when elem(hd(elem(node, 1)), 1) == :regr_avgy
-  
-  defguard is_kw_regr_count(node) when elem(hd(elem(node, 1)), 1) == :regr_count
-  
-  defguard is_kw_regr_intercept(node) when elem(hd(elem(node, 1)), 1) == :regr_intercept
-  
-  defguard is_kw_regr_r2(node) when elem(hd(elem(node, 1)), 1) == :regr_r2
-  
-  defguard is_kw_regr_slope(node) when elem(hd(elem(node, 1)), 1) == :regr_slope
-  
-  defguard is_kw_regr_sxx(node) when elem(hd(elem(node, 1)), 1) == :regr_sxx
-  
-  defguard is_kw_regr_sxy(node) when elem(hd(elem(node, 1)), 1) == :regr_sxy
-  
-  defguard is_kw_regr_syy(node) when elem(hd(elem(node, 1)), 1) == :regr_syy
-  
-  defguard is_kw_release(node) when elem(hd(elem(node, 1)), 1) == :release
-  
-  defguard is_kw_result(node) when elem(hd(elem(node, 1)), 1) == :result
-  
-  defguard is_kw_return(node) when elem(hd(elem(node, 1)), 1) == :return
-  
-  defguard is_kw_returns(node) when elem(hd(elem(node, 1)), 1) == :returns
-  
-  defguard is_kw_revoke(node) when elem(hd(elem(node, 1)), 1) == :revoke
-  
-  defguard is_kw_right(node) when elem(hd(elem(node, 1)), 1) == :right
-  
-  defguard is_kw_rollback(node) when elem(hd(elem(node, 1)), 1) == :rollback
-  
-  defguard is_kw_rollup(node) when elem(hd(elem(node, 1)), 1) == :rollup
-  
-  defguard is_kw_row(node) when elem(hd(elem(node, 1)), 1) == :row
-  
-  defguard is_kw_row_number(node) when elem(hd(elem(node, 1)), 1) == :row_number
-  
-  defguard is_kw_rows(node) when elem(hd(elem(node, 1)), 1) == :rows
-  
-  defguard is_kw_rpad(node) when elem(hd(elem(node, 1)), 1) == :rpad
-  
-  defguard is_kw_rtrim(node) when elem(hd(elem(node, 1)), 1) == :rtrim
-  
-  defguard is_kw_running(node) when elem(hd(elem(node, 1)), 1) == :running
-  
-  defguard is_kw_savepoint(node) when elem(hd(elem(node, 1)), 1) == :savepoint
-  
-  defguard is_kw_scope(node) when elem(hd(elem(node, 1)), 1) == :scope
-  
-  defguard is_kw_scroll(node) when elem(hd(elem(node, 1)), 1) == :scroll
-  
-  defguard is_kw_search(node) when elem(hd(elem(node, 1)), 1) == :search
-  
-  defguard is_kw_second(node) when elem(hd(elem(node, 1)), 1) == :second
-  
-  defguard is_kw_seek(node) when elem(hd(elem(node, 1)), 1) == :seek
-  
-  defguard is_kw_select(node) when elem(hd(elem(node, 1)), 1) == :select
-  
-  defguard is_kw_sensitive(node) when elem(hd(elem(node, 1)), 1) == :sensitive
-  
-  defguard is_kw_session_user(node) when elem(hd(elem(node, 1)), 1) == :session_user
-  
-  defguard is_kw_set(node) when elem(hd(elem(node, 1)), 1) == :set
-  
-  defguard is_kw_show(node) when elem(hd(elem(node, 1)), 1) == :show
-  
-  defguard is_kw_similar(node) when elem(hd(elem(node, 1)), 1) == :similar
-  
-  defguard is_kw_sin(node) when elem(hd(elem(node, 1)), 1) == :sin
-  
-  defguard is_kw_sinh(node) when elem(hd(elem(node, 1)), 1) == :sinh
-  
-  defguard is_kw_skip(node) when elem(hd(elem(node, 1)), 1) == :skip
-  
-  defguard is_kw_smallint(node) when elem(hd(elem(node, 1)), 1) == :smallint
-  
-  defguard is_kw_some(node) when elem(hd(elem(node, 1)), 1) == :some
-  
-  defguard is_kw_specific(node) when elem(hd(elem(node, 1)), 1) == :specific
-  
-  defguard is_kw_specifictype(node) when elem(hd(elem(node, 1)), 1) == :specifictype
-  
-  defguard is_kw_sql(node) when elem(hd(elem(node, 1)), 1) == :sql
-  
-  defguard is_kw_sqlexception(node) when elem(hd(elem(node, 1)), 1) == :sqlexception
-  
-  defguard is_kw_sqlstate(node) when elem(hd(elem(node, 1)), 1) == :sqlstate
-  
-  defguard is_kw_sqlwarning(node) when elem(hd(elem(node, 1)), 1) == :sqlwarning
-  
-  defguard is_kw_sqrt(node) when elem(hd(elem(node, 1)), 1) == :sqrt
-  
-  defguard is_kw_start(node) when elem(hd(elem(node, 1)), 1) == :start
-  
-  defguard is_kw_static(node) when elem(hd(elem(node, 1)), 1) == :static
-  
-  defguard is_kw_stddev_pop(node) when elem(hd(elem(node, 1)), 1) == :stddev_pop
-  
-  defguard is_kw_stddev_samp(node) when elem(hd(elem(node, 1)), 1) == :stddev_samp
-  
-  defguard is_kw_submultiset(node) when elem(hd(elem(node, 1)), 1) == :submultiset
-  
-  defguard is_kw_subset(node) when elem(hd(elem(node, 1)), 1) == :subset
-  
-  defguard is_kw_substring(node) when elem(hd(elem(node, 1)), 1) == :substring
-  
-  defguard is_kw_substring_regex(node) when elem(hd(elem(node, 1)), 1) == :substring_regex
-  
-  defguard is_kw_succeeds(node) when elem(hd(elem(node, 1)), 1) == :succeeds
-  
-  defguard is_kw_sum(node) when elem(hd(elem(node, 1)), 1) == :sum
-  
-  defguard is_kw_symmetric(node) when elem(hd(elem(node, 1)), 1) == :symmetric
-  
-  defguard is_kw_system(node) when elem(hd(elem(node, 1)), 1) == :system
-  
-  defguard is_kw_system_time(node) when elem(hd(elem(node, 1)), 1) == :system_time
-  
-  defguard is_kw_system_user(node) when elem(hd(elem(node, 1)), 1) == :system_user
-  
-  defguard is_kw_table(node) when elem(hd(elem(node, 1)), 1) == :table
-  
-  defguard is_kw_tablesample(node) when elem(hd(elem(node, 1)), 1) == :tablesample
-  
-  defguard is_kw_tan(node) when elem(hd(elem(node, 1)), 1) == :tan
-  
-  defguard is_kw_tanh(node) when elem(hd(elem(node, 1)), 1) == :tanh
-  
-  defguard is_kw_then(node) when elem(hd(elem(node, 1)), 1) == :then
-  
-  defguard is_kw_time(node) when elem(hd(elem(node, 1)), 1) == :time
-  
-  defguard is_kw_timestamp(node) when elem(hd(elem(node, 1)), 1) == :timestamp
-  
-  defguard is_kw_timezone_hour(node) when elem(hd(elem(node, 1)), 1) == :timezone_hour
-  
-  defguard is_kw_timezone_minute(node) when elem(hd(elem(node, 1)), 1) == :timezone_minute
-  
-  defguard is_kw_to(node) when elem(hd(elem(node, 1)), 1) == :to
-  
-  defguard is_kw_trailing(node) when elem(hd(elem(node, 1)), 1) == :trailing
-  
-  defguard is_kw_translate(node) when elem(hd(elem(node, 1)), 1) == :translate
-  
-  defguard is_kw_translate_regex(node) when elem(hd(elem(node, 1)), 1) == :translate_regex
-  
-  defguard is_kw_translation(node) when elem(hd(elem(node, 1)), 1) == :translation
-  
-  defguard is_kw_treat(node) when elem(hd(elem(node, 1)), 1) == :treat
-  
-  defguard is_kw_trigger(node) when elem(hd(elem(node, 1)), 1) == :trigger
-  
-  defguard is_kw_trim(node) when elem(hd(elem(node, 1)), 1) == :trim
-  
-  defguard is_kw_trim_array(node) when elem(hd(elem(node, 1)), 1) == :trim_array
-  
-  defguard is_kw_true(node) when elem(hd(elem(node, 1)), 1) == true
-  
-  defguard is_kw_truncate(node) when elem(hd(elem(node, 1)), 1) == :truncate
-  
-  defguard is_kw_uescape(node) when elem(hd(elem(node, 1)), 1) == :uescape
-  
-  defguard is_kw_union(node) when elem(hd(elem(node, 1)), 1) == :union
-  
-  defguard is_kw_unique(node) when elem(hd(elem(node, 1)), 1) == :unique
-  
-  defguard is_kw_unknown(node) when elem(hd(elem(node, 1)), 1) == :unknown
-  
-  defguard is_kw_unnest(node) when elem(hd(elem(node, 1)), 1) == :unnest
-  
-  defguard is_kw_update(node) when elem(hd(elem(node, 1)), 1) == :update
-  
-  defguard is_kw_upper(node) when elem(hd(elem(node, 1)), 1) == :upper
-  
-  defguard is_kw_user(node) when elem(hd(elem(node, 1)), 1) == :user
-  
-  defguard is_kw_using(node) when elem(hd(elem(node, 1)), 1) == :using
-  
-  defguard is_kw_value(node) when elem(hd(elem(node, 1)), 1) == :value
-  
-  defguard is_kw_values(node) when elem(hd(elem(node, 1)), 1) == :values
-  
-  defguard is_kw_value_of(node) when elem(hd(elem(node, 1)), 1) == :value_of
-  
-  defguard is_kw_var_pop(node) when elem(hd(elem(node, 1)), 1) == :var_pop
-  
-  defguard is_kw_var_samp(node) when elem(hd(elem(node, 1)), 1) == :var_samp
-  
-  defguard is_kw_varbinary(node) when elem(hd(elem(node, 1)), 1) == :varbinary
-  
-  defguard is_kw_varchar(node) when elem(hd(elem(node, 1)), 1) == :varchar
-  
-  defguard is_kw_varying(node) when elem(hd(elem(node, 1)), 1) == :varying
-  
-  defguard is_kw_versioning(node) when elem(hd(elem(node, 1)), 1) == :versioning
-  
-  defguard is_kw_when(node) when elem(hd(elem(node, 1)), 1) == :when
-  
-  defguard is_kw_whenever(node) when elem(hd(elem(node, 1)), 1) == :whenever
-  
-  defguard is_kw_where(node) when elem(hd(elem(node, 1)), 1) == :where
-  
-  defguard is_kw_width_bucket(node) when elem(hd(elem(node, 1)), 1) == :width_bucket
-  
-  defguard is_kw_window(node) when elem(hd(elem(node, 1)), 1) == :window
-  
-  defguard is_kw_with(node) when elem(hd(elem(node, 1)), 1) == :with
-  
-  defguard is_kw_within(node) when elem(hd(elem(node, 1)), 1) == :within
-  
-  defguard is_kw_without(node) when elem(hd(elem(node, 1)), 1) == :without
-  
-  defguard is_kw_year(node) when elem(hd(elem(node, 1)), 1) == :year
-  
-  defguard is_kw_limit(node) when elem(hd(elem(node, 1)), 1) == :limit
-  
-  defguard is_kw_ilike(node) when elem(hd(elem(node, 1)), 1) == :ilike
-  
-  defguard is_kw_backward(node) when elem(hd(elem(node, 1)), 1) == :backward
-  
-  defguard is_kw_forward(node) when elem(hd(elem(node, 1)), 1) == :forward
-  
-  defguard is_kw_isnull(node) when elem(hd(elem(node, 1)), 1) == :isnull
-  
-  defguard is_kw_notnull(node) when elem(hd(elem(node, 1)), 1) == :notnull
-  
-  defguard is_kw_datetime(node) when elem(hd(elem(node, 1)), 1) == :datetime
-  
-  defguard is_kw_flag(node) when elem(hd(elem(node, 1)), 1) == :flag
-  
-  defguard is_kw_keyvalue(node) when elem(hd(elem(node, 1)), 1) == :keyvalue
-  
-  defguard is_kw_last(node) when elem(hd(elem(node, 1)), 1) == :last
-  
-  defguard is_kw_lax(node) when elem(hd(elem(node, 1)), 1) == :lax
-  
-  defguard is_kw_number(node) when elem(hd(elem(node, 1)), 1) == :number
-  
-  defguard is_kw_size(node) when elem(hd(elem(node, 1)), 1) == :size
-  
-  defguard is_kw_starts(node) when elem(hd(elem(node, 1)), 1) == :starts
-  
-  defguard is_kw_strict(node) when elem(hd(elem(node, 1)), 1) == :strict
-  
-  defguard is_kw_string(node) when elem(hd(elem(node, 1)), 1) == :string
-  
-  defguard is_kw_time_tz(node) when elem(hd(elem(node, 1)), 1) == :time_tz
-  
-  defguard is_kw_timestamp_tz(node) when elem(hd(elem(node, 1)), 1) == :timestamp_tz
-  
-  defguard is_kw_type(node) when elem(hd(elem(node, 1)), 1) == :type
-  
-  defguard is_kw_a(node) when elem(hd(elem(node, 1)), 1) == :a
-  
-  defguard is_kw_absolute(node) when elem(hd(elem(node, 1)), 1) == :absolute
-  
-  defguard is_kw_action(node) when elem(hd(elem(node, 1)), 1) == :action
-  
-  defguard is_kw_ada(node) when elem(hd(elem(node, 1)), 1) == :ada
-  
-  defguard is_kw_add(node) when elem(hd(elem(node, 1)), 1) == :add
-  
-  defguard is_kw_admin(node) when elem(hd(elem(node, 1)), 1) == :admin
-  
-  defguard is_kw_after(node) when elem(hd(elem(node, 1)), 1) == :after
-  
-  defguard is_kw_always(node) when elem(hd(elem(node, 1)), 1) == :always
-  
-  defguard is_kw_asc(node) when elem(hd(elem(node, 1)), 1) == :asc
-  
-  defguard is_kw_assertion(node) when elem(hd(elem(node, 1)), 1) == :assertion
-  
-  defguard is_kw_assignment(node) when elem(hd(elem(node, 1)), 1) == :assignment
-  
-  defguard is_kw_attribute(node) when elem(hd(elem(node, 1)), 1) == :attribute
-  
-  defguard is_kw_attributes(node) when elem(hd(elem(node, 1)), 1) == :attributes
-  
-  defguard is_kw_before(node) when elem(hd(elem(node, 1)), 1) == :before
-  
-  defguard is_kw_bernoulli(node) when elem(hd(elem(node, 1)), 1) == :bernoulli
-  
-  defguard is_kw_breadth(node) when elem(hd(elem(node, 1)), 1) == :breadth
-  
-  defguard is_kw_c(node) when elem(hd(elem(node, 1)), 1) == :c
-  
-  defguard is_kw_cascade(node) when elem(hd(elem(node, 1)), 1) == :cascade
-  
-  defguard is_kw_catalog(node) when elem(hd(elem(node, 1)), 1) == :catalog
-  
-  defguard is_kw_catalog_name(node) when elem(hd(elem(node, 1)), 1) == :catalog_name
-  
-  defguard is_kw_chain(node) when elem(hd(elem(node, 1)), 1) == :chain
-  
-  defguard is_kw_chaining(node) when elem(hd(elem(node, 1)), 1) == :chaining
-  
-  defguard is_kw_character_set_catalog(node) when elem(hd(elem(node, 1)), 1) == :character_set_catalog
-  
-  defguard is_kw_character_set_name(node) when elem(hd(elem(node, 1)), 1) == :character_set_name
-  
-  defguard is_kw_character_set_schema(node) when elem(hd(elem(node, 1)), 1) == :character_set_schema
-  
-  defguard is_kw_characteristics(node) when elem(hd(elem(node, 1)), 1) == :characteristics
-  
-  defguard is_kw_characters(node) when elem(hd(elem(node, 1)), 1) == :characters
-  
-  defguard is_kw_class_origin(node) when elem(hd(elem(node, 1)), 1) == :class_origin
-  
-  defguard is_kw_cobol(node) when elem(hd(elem(node, 1)), 1) == :cobol
-  
-  defguard is_kw_collation(node) when elem(hd(elem(node, 1)), 1) == :collation
-  
-  defguard is_kw_collation_catalog(node) when elem(hd(elem(node, 1)), 1) == :collation_catalog
-  
-  defguard is_kw_collation_name(node) when elem(hd(elem(node, 1)), 1) == :collation_name
-  
-  defguard is_kw_collation_schema(node) when elem(hd(elem(node, 1)), 1) == :collation_schema
-  
-  defguard is_kw_columns(node) when elem(hd(elem(node, 1)), 1) == :columns
-  
-  defguard is_kw_column_name(node) when elem(hd(elem(node, 1)), 1) == :column_name
-  
-  defguard is_kw_command_function(node) when elem(hd(elem(node, 1)), 1) == :command_function
-  
-  defguard is_kw_command_function_code(node) when elem(hd(elem(node, 1)), 1) == :command_function_code
-  
-  defguard is_kw_committed(node) when elem(hd(elem(node, 1)), 1) == :committed
-  
-  defguard is_kw_conditional(node) when elem(hd(elem(node, 1)), 1) == :conditional
-  
-  defguard is_kw_condition_number(node) when elem(hd(elem(node, 1)), 1) == :condition_number
-  
-  defguard is_kw_connection(node) when elem(hd(elem(node, 1)), 1) == :connection
-  
-  defguard is_kw_connection_name(node) when elem(hd(elem(node, 1)), 1) == :connection_name
-  
-  defguard is_kw_constraint_catalog(node) when elem(hd(elem(node, 1)), 1) == :constraint_catalog
-  
-  defguard is_kw_constraint_name(node) when elem(hd(elem(node, 1)), 1) == :constraint_name
-  
-  defguard is_kw_constraint_schema(node) when elem(hd(elem(node, 1)), 1) == :constraint_schema
-  
-  defguard is_kw_constraints(node) when elem(hd(elem(node, 1)), 1) == :constraints
-  
-  defguard is_kw_constructor(node) when elem(hd(elem(node, 1)), 1) == :constructor
-  
-  defguard is_kw_continue(node) when elem(hd(elem(node, 1)), 1) == :continue
-  
-  defguard is_kw_copartition(node) when elem(hd(elem(node, 1)), 1) == :copartition
-  
-  defguard is_kw_cursor_name(node) when elem(hd(elem(node, 1)), 1) == :cursor_name
-  
-  defguard is_kw_data(node) when elem(hd(elem(node, 1)), 1) == :data
-  
-  defguard is_kw_datetime_interval_code(node) when elem(hd(elem(node, 1)), 1) == :datetime_interval_code
-  
-  defguard is_kw_datetime_interval_precision(node) when elem(hd(elem(node, 1)), 1) == :datetime_interval_precision
-  
-  defguard is_kw_defaults(node) when elem(hd(elem(node, 1)), 1) == :defaults
-  
-  defguard is_kw_deferrable(node) when elem(hd(elem(node, 1)), 1) == :deferrable
-  
-  defguard is_kw_deferred(node) when elem(hd(elem(node, 1)), 1) == :deferred
-  
-  defguard is_kw_defined(node) when elem(hd(elem(node, 1)), 1) == :defined
-  
-  defguard is_kw_definer(node) when elem(hd(elem(node, 1)), 1) == :definer
-  
-  defguard is_kw_degree(node) when elem(hd(elem(node, 1)), 1) == :degree
-  
-  defguard is_kw_depth(node) when elem(hd(elem(node, 1)), 1) == :depth
-  
-  defguard is_kw_derived(node) when elem(hd(elem(node, 1)), 1) == :derived
-  
-  defguard is_kw_desc(node) when elem(hd(elem(node, 1)), 1) == :desc
-  
-  defguard is_kw_descriptor(node) when elem(hd(elem(node, 1)), 1) == :descriptor
-  
-  defguard is_kw_diagnostics(node) when elem(hd(elem(node, 1)), 1) == :diagnostics
-  
-  defguard is_kw_dispatch(node) when elem(hd(elem(node, 1)), 1) == :dispatch
-  
-  defguard is_kw_domain(node) when elem(hd(elem(node, 1)), 1) == :domain
-  
-  defguard is_kw_dynamic_function(node) when elem(hd(elem(node, 1)), 1) == :dynamic_function
-  
-  defguard is_kw_dynamic_function_code(node) when elem(hd(elem(node, 1)), 1) == :dynamic_function_code
-  
-  defguard is_kw_encoding(node) when elem(hd(elem(node, 1)), 1) == :encoding
-  
-  defguard is_kw_enforced(node) when elem(hd(elem(node, 1)), 1) == :enforced
-  
-  defguard is_kw_error(node) when elem(hd(elem(node, 1)), 1) == :error
-  
-  defguard is_kw_exclude(node) when elem(hd(elem(node, 1)), 1) == :exclude
-  
-  defguard is_kw_excluding(node) when elem(hd(elem(node, 1)), 1) == :excluding
-  
-  defguard is_kw_expression(node) when elem(hd(elem(node, 1)), 1) == :expression
-  
-  defguard is_kw_final(node) when elem(hd(elem(node, 1)), 1) == :final
-  
-  defguard is_kw_finish(node) when elem(hd(elem(node, 1)), 1) == :finish
-  
-  defguard is_kw_first(node) when elem(hd(elem(node, 1)), 1) == :first
-  
-  defguard is_kw_following(node) when elem(hd(elem(node, 1)), 1) == :following
-  
-  defguard is_kw_format(node) when elem(hd(elem(node, 1)), 1) == :format
-  
-  defguard is_kw_fortran(node) when elem(hd(elem(node, 1)), 1) == :fortran
-  
-  defguard is_kw_found(node) when elem(hd(elem(node, 1)), 1) == :found
-  
-  defguard is_kw_fulfill(node) when elem(hd(elem(node, 1)), 1) == :fulfill
-  
-  defguard is_kw_g(node) when elem(hd(elem(node, 1)), 1) == :g
-  
-  defguard is_kw_general(node) when elem(hd(elem(node, 1)), 1) == :general
-  
-  defguard is_kw_generated(node) when elem(hd(elem(node, 1)), 1) == :generated
-  
-  defguard is_kw_go(node) when elem(hd(elem(node, 1)), 1) == :go
-  
-  defguard is_kw_goto(node) when elem(hd(elem(node, 1)), 1) == :goto
-  
-  defguard is_kw_granted(node) when elem(hd(elem(node, 1)), 1) == :granted
-  
-  defguard is_kw_hierarchy(node) when elem(hd(elem(node, 1)), 1) == :hierarchy
-  
-  defguard is_kw_ignore(node) when elem(hd(elem(node, 1)), 1) == :ignore
-  
-  defguard is_kw_immediate(node) when elem(hd(elem(node, 1)), 1) == :immediate
-  
-  defguard is_kw_immediately(node) when elem(hd(elem(node, 1)), 1) == :immediately
-  
-  defguard is_kw_implementation(node) when elem(hd(elem(node, 1)), 1) == :implementation
-  
-  defguard is_kw_including(node) when elem(hd(elem(node, 1)), 1) == :including
-  
-  defguard is_kw_increment(node) when elem(hd(elem(node, 1)), 1) == :increment
-  
-  defguard is_kw_initially(node) when elem(hd(elem(node, 1)), 1) == :initially
-  
-  defguard is_kw_input(node) when elem(hd(elem(node, 1)), 1) == :input
-  
-  defguard is_kw_instance(node) when elem(hd(elem(node, 1)), 1) == :instance
-  
-  defguard is_kw_instantiable(node) when elem(hd(elem(node, 1)), 1) == :instantiable
-  
-  defguard is_kw_instead(node) when elem(hd(elem(node, 1)), 1) == :instead
-  
-  defguard is_kw_invoker(node) when elem(hd(elem(node, 1)), 1) == :invoker
-  
-  defguard is_kw_isolation(node) when elem(hd(elem(node, 1)), 1) == :isolation
-  
-  defguard is_kw_k(node) when elem(hd(elem(node, 1)), 1) == :k
-  
-  defguard is_kw_keep(node) when elem(hd(elem(node, 1)), 1) == :keep
-  
-  defguard is_kw_key(node) when elem(hd(elem(node, 1)), 1) == :key
-  
-  defguard is_kw_keys(node) when elem(hd(elem(node, 1)), 1) == :keys
-  
-  defguard is_kw_key_member(node) when elem(hd(elem(node, 1)), 1) == :key_member
-  
-  defguard is_kw_key_type(node) when elem(hd(elem(node, 1)), 1) == :key_type
-  
-  defguard is_kw_length(node) when elem(hd(elem(node, 1)), 1) == :length
-  
-  defguard is_kw_level(node) when elem(hd(elem(node, 1)), 1) == :level
-  
-  defguard is_kw_locator(node) when elem(hd(elem(node, 1)), 1) == :locator
-  
-  defguard is_kw_m(node) when elem(hd(elem(node, 1)), 1) == :m
-  
-  defguard is_kw_map(node) when elem(hd(elem(node, 1)), 1) == :map
-  
-  defguard is_kw_matched(node) when elem(hd(elem(node, 1)), 1) == :matched
-  
-  defguard is_kw_maxvalue(node) when elem(hd(elem(node, 1)), 1) == :maxvalue
-  
-  defguard is_kw_measures(node) when elem(hd(elem(node, 1)), 1) == :measures
-  
-  defguard is_kw_message_length(node) when elem(hd(elem(node, 1)), 1) == :message_length
-  
-  defguard is_kw_message_octet_length(node) when elem(hd(elem(node, 1)), 1) == :message_octet_length
-  
-  defguard is_kw_message_text(node) when elem(hd(elem(node, 1)), 1) == :message_text
-  
-  defguard is_kw_minvalue(node) when elem(hd(elem(node, 1)), 1) == :minvalue
-  
-  defguard is_kw_more(node) when elem(hd(elem(node, 1)), 1) == :more
-  
-  defguard is_kw_mumps(node) when elem(hd(elem(node, 1)), 1) == :mumps
-  
-  defguard is_kw_name(node) when elem(hd(elem(node, 1)), 1) == :name
-  
-  defguard is_kw_names(node) when elem(hd(elem(node, 1)), 1) == :names
-  
-  defguard is_kw_nested(node) when elem(hd(elem(node, 1)), 1) == :nested
-  
-  defguard is_kw_nesting(node) when elem(hd(elem(node, 1)), 1) == :nesting
-  
-  defguard is_kw_next(node) when elem(hd(elem(node, 1)), 1) == :next
-  
-  defguard is_kw_nfc(node) when elem(hd(elem(node, 1)), 1) == :nfc
-  
-  defguard is_kw_nfd(node) when elem(hd(elem(node, 1)), 1) == :nfd
-  
-  defguard is_kw_nfkc(node) when elem(hd(elem(node, 1)), 1) == :nfkc
-  
-  defguard is_kw_nfkd(node) when elem(hd(elem(node, 1)), 1) == :nfkd
-  
-  defguard is_kw_normalized(node) when elem(hd(elem(node, 1)), 1) == :normalized
-  
-  defguard is_kw_null_ordering(node) when elem(hd(elem(node, 1)), 1) == :null_ordering
-  
-  defguard is_kw_nullable(node) when elem(hd(elem(node, 1)), 1) == :nullable
-  
-  defguard is_kw_nulls(node) when elem(hd(elem(node, 1)), 1) == :nulls
-  
-  defguard is_kw_object(node) when elem(hd(elem(node, 1)), 1) == :object
-  
-  defguard is_kw_occurrence(node) when elem(hd(elem(node, 1)), 1) == :occurrence
-  
-  defguard is_kw_octets(node) when elem(hd(elem(node, 1)), 1) == :octets
-  
-  defguard is_kw_option(node) when elem(hd(elem(node, 1)), 1) == :option
-  
-  defguard is_kw_options(node) when elem(hd(elem(node, 1)), 1) == :options
-  
-  defguard is_kw_ordering(node) when elem(hd(elem(node, 1)), 1) == :ordering
-  
-  defguard is_kw_ordinality(node) when elem(hd(elem(node, 1)), 1) == :ordinality
-  
-  defguard is_kw_others(node) when elem(hd(elem(node, 1)), 1) == :others
-  
-  defguard is_kw_output(node) when elem(hd(elem(node, 1)), 1) == :output
-  
-  defguard is_kw_overflow(node) when elem(hd(elem(node, 1)), 1) == :overflow
-  
-  defguard is_kw_overriding(node) when elem(hd(elem(node, 1)), 1) == :overriding
-  
-  defguard is_kw_p(node) when elem(hd(elem(node, 1)), 1) == :p
-  
-  defguard is_kw_pad(node) when elem(hd(elem(node, 1)), 1) == :pad
-  
-  defguard is_kw_parameter_mode(node) when elem(hd(elem(node, 1)), 1) == :parameter_mode
-  
-  defguard is_kw_parameter_name(node) when elem(hd(elem(node, 1)), 1) == :parameter_name
-  
-  defguard is_kw_parameter_ordinal_position(node) when elem(hd(elem(node, 1)), 1) == :parameter_ordinal_position
-  
-  defguard is_kw_parameter_specific_catalog(node) when elem(hd(elem(node, 1)), 1) == :parameter_specific_catalog
-  
-  defguard is_kw_parameter_specific_name(node) when elem(hd(elem(node, 1)), 1) == :parameter_specific_name
-  
-  defguard is_kw_parameter_specific_schema(node) when elem(hd(elem(node, 1)), 1) == :parameter_specific_schema
-  
-  defguard is_kw_partial(node) when elem(hd(elem(node, 1)), 1) == :partial
-  
-  defguard is_kw_pascal(node) when elem(hd(elem(node, 1)), 1) == :pascal
-  
-  defguard is_kw_pass(node) when elem(hd(elem(node, 1)), 1) == :pass
-  
-  defguard is_kw_passing(node) when elem(hd(elem(node, 1)), 1) == :passing
-  
-  defguard is_kw_past(node) when elem(hd(elem(node, 1)), 1) == :past
-  
-  defguard is_kw_path(node) when elem(hd(elem(node, 1)), 1) == :path
-  
-  defguard is_kw_permute(node) when elem(hd(elem(node, 1)), 1) == :permute
-  
-  defguard is_kw_pipe(node) when elem(hd(elem(node, 1)), 1) == :pipe
-  
-  defguard is_kw_placing(node) when elem(hd(elem(node, 1)), 1) == :placing
-  
-  defguard is_kw_plan(node) when elem(hd(elem(node, 1)), 1) == :plan
-  
-  defguard is_kw_pli(node) when elem(hd(elem(node, 1)), 1) == :pli
-  
-  defguard is_kw_preceding(node) when elem(hd(elem(node, 1)), 1) == :preceding
-  
-  defguard is_kw_preserve(node) when elem(hd(elem(node, 1)), 1) == :preserve
-  
-  defguard is_kw_prev(node) when elem(hd(elem(node, 1)), 1) == :prev
-  
-  defguard is_kw_prior(node) when elem(hd(elem(node, 1)), 1) == :prior
-  
-  defguard is_kw_private(node) when elem(hd(elem(node, 1)), 1) == :private
-  
-  defguard is_kw_privileges(node) when elem(hd(elem(node, 1)), 1) == :privileges
-  
-  defguard is_kw_prune(node) when elem(hd(elem(node, 1)), 1) == :prune
-  
-  defguard is_kw_public(node) when elem(hd(elem(node, 1)), 1) == :public
-  
-  defguard is_kw_quotes(node) when elem(hd(elem(node, 1)), 1) == :quotes
-  
-  defguard is_kw_read(node) when elem(hd(elem(node, 1)), 1) == :read
-  
-  defguard is_kw_relative(node) when elem(hd(elem(node, 1)), 1) == :relative
-  
-  defguard is_kw_repeatable(node) when elem(hd(elem(node, 1)), 1) == :repeatable
-  
-  defguard is_kw_respect(node) when elem(hd(elem(node, 1)), 1) == :respect
-  
-  defguard is_kw_restart(node) when elem(hd(elem(node, 1)), 1) == :restart
-  
-  defguard is_kw_restrict(node) when elem(hd(elem(node, 1)), 1) == :restrict
-  
-  defguard is_kw_returned_cardinality(node) when elem(hd(elem(node, 1)), 1) == :returned_cardinality
-  
-  defguard is_kw_returned_length(node) when elem(hd(elem(node, 1)), 1) == :returned_length
-  
-  defguard is_kw_returned_octet_length(node) when elem(hd(elem(node, 1)), 1) == :returned_octet_length
-  
-  defguard is_kw_returned_sqlstate(node) when elem(hd(elem(node, 1)), 1) == :returned_sqlstate
-  
-  defguard is_kw_returning(node) when elem(hd(elem(node, 1)), 1) == :returning
-  
-  defguard is_kw_role(node) when elem(hd(elem(node, 1)), 1) == :role
-  
-  defguard is_kw_routine(node) when elem(hd(elem(node, 1)), 1) == :routine
-  
-  defguard is_kw_routine_catalog(node) when elem(hd(elem(node, 1)), 1) == :routine_catalog
-  
-  defguard is_kw_routine_name(node) when elem(hd(elem(node, 1)), 1) == :routine_name
-  
-  defguard is_kw_routine_schema(node) when elem(hd(elem(node, 1)), 1) == :routine_schema
-  
-  defguard is_kw_row_count(node) when elem(hd(elem(node, 1)), 1) == :row_count
-  
-  defguard is_kw_scalar(node) when elem(hd(elem(node, 1)), 1) == :scalar
-  
-  defguard is_kw_scale(node) when elem(hd(elem(node, 1)), 1) == :scale
-  
-  defguard is_kw_schema(node) when elem(hd(elem(node, 1)), 1) == :schema
-  
-  defguard is_kw_schema_name(node) when elem(hd(elem(node, 1)), 1) == :schema_name
-  
-  defguard is_kw_scope_catalog(node) when elem(hd(elem(node, 1)), 1) == :scope_catalog
-  
-  defguard is_kw_scope_name(node) when elem(hd(elem(node, 1)), 1) == :scope_name
-  
-  defguard is_kw_scope_schema(node) when elem(hd(elem(node, 1)), 1) == :scope_schema
-  
-  defguard is_kw_section(node) when elem(hd(elem(node, 1)), 1) == :section
-  
-  defguard is_kw_security(node) when elem(hd(elem(node, 1)), 1) == :security
-  
-  defguard is_kw_self(node) when elem(hd(elem(node, 1)), 1) == :self
-  
-  defguard is_kw_semantics(node) when elem(hd(elem(node, 1)), 1) == :semantics
-  
-  defguard is_kw_sequence(node) when elem(hd(elem(node, 1)), 1) == :sequence
-  
-  defguard is_kw_serializable(node) when elem(hd(elem(node, 1)), 1) == :serializable
-  
-  defguard is_kw_server_name(node) when elem(hd(elem(node, 1)), 1) == :server_name
-  
-  defguard is_kw_session(node) when elem(hd(elem(node, 1)), 1) == :session
-  
-  defguard is_kw_sets(node) when elem(hd(elem(node, 1)), 1) == :sets
-  
-  defguard is_kw_simple(node) when elem(hd(elem(node, 1)), 1) == :simple
-  
-  defguard is_kw_sort_direction(node) when elem(hd(elem(node, 1)), 1) == :sort_direction
-  
-  defguard is_kw_source(node) when elem(hd(elem(node, 1)), 1) == :source
-  
-  defguard is_kw_space(node) when elem(hd(elem(node, 1)), 1) == :space
-  
-  defguard is_kw_specific_name(node) when elem(hd(elem(node, 1)), 1) == :specific_name
-  
-  defguard is_kw_state(node) when elem(hd(elem(node, 1)), 1) == :state
-  
-  defguard is_kw_statement(node) when elem(hd(elem(node, 1)), 1) == :statement
-  
-  defguard is_kw_structure(node) when elem(hd(elem(node, 1)), 1) == :structure
-  
-  defguard is_kw_style(node) when elem(hd(elem(node, 1)), 1) == :style
-  
-  defguard is_kw_subclass_origin(node) when elem(hd(elem(node, 1)), 1) == :subclass_origin
-  
-  defguard is_kw_t(node) when elem(hd(elem(node, 1)), 1) == :t
-  
-  defguard is_kw_table_name(node) when elem(hd(elem(node, 1)), 1) == :table_name
-  
-  defguard is_kw_temporary(node) when elem(hd(elem(node, 1)), 1) == :temporary
-  
-  defguard is_kw_through(node) when elem(hd(elem(node, 1)), 1) == :through
-  
-  defguard is_kw_ties(node) when elem(hd(elem(node, 1)), 1) == :ties
-  
-  defguard is_kw_top_level_count(node) when elem(hd(elem(node, 1)), 1) == :top_level_count
-  
-  defguard is_kw_transaction(node) when elem(hd(elem(node, 1)), 1) == :transaction
-  
-  defguard is_kw_transaction_active(node) when elem(hd(elem(node, 1)), 1) == :transaction_active
-  
-  defguard is_kw_transactions_committed(node) when elem(hd(elem(node, 1)), 1) == :transactions_committed
-  
-  defguard is_kw_transactions_rolled_back(node) when elem(hd(elem(node, 1)), 1) == :transactions_rolled_back
-  
-  defguard is_kw_transform(node) when elem(hd(elem(node, 1)), 1) == :transform
-  
-  defguard is_kw_transforms(node) when elem(hd(elem(node, 1)), 1) == :transforms
-  
-  defguard is_kw_trigger_catalog(node) when elem(hd(elem(node, 1)), 1) == :trigger_catalog
-  
-  defguard is_kw_trigger_name(node) when elem(hd(elem(node, 1)), 1) == :trigger_name
-  
-  defguard is_kw_trigger_schema(node) when elem(hd(elem(node, 1)), 1) == :trigger_schema
-  
-  defguard is_kw_unbounded(node) when elem(hd(elem(node, 1)), 1) == :unbounded
-  
-  defguard is_kw_uncommitted(node) when elem(hd(elem(node, 1)), 1) == :uncommitted
-  
-  defguard is_kw_unconditional(node) when elem(hd(elem(node, 1)), 1) == :unconditional
-  
-  defguard is_kw_under(node) when elem(hd(elem(node, 1)), 1) == :under
-  
-  defguard is_kw_unmatched(node) when elem(hd(elem(node, 1)), 1) == :unmatched
-  
-  defguard is_kw_unnamed(node) when elem(hd(elem(node, 1)), 1) == :unnamed
-  
-  defguard is_kw_usage(node) when elem(hd(elem(node, 1)), 1) == :usage
-  
-  defguard is_kw_user_defined_type_catalog(node) when elem(hd(elem(node, 1)), 1) == :user_defined_type_catalog
-  
-  defguard is_kw_user_defined_type_code(node) when elem(hd(elem(node, 1)), 1) == :user_defined_type_code
-  
-  defguard is_kw_user_defined_type_name(node) when elem(hd(elem(node, 1)), 1) == :user_defined_type_name
-  
-  defguard is_kw_user_defined_type_schema(node) when elem(hd(elem(node, 1)), 1) == :user_defined_type_schema
-  
-  defguard is_kw_utf16(node) when elem(hd(elem(node, 1)), 1) == :utf16
-  
-  defguard is_kw_utf32(node) when elem(hd(elem(node, 1)), 1) == :utf32
-  
-  defguard is_kw_utf8(node) when elem(hd(elem(node, 1)), 1) == :utf8
-  
-  defguard is_kw_view(node) when elem(hd(elem(node, 1)), 1) == :view
-  
-  defguard is_kw_work(node) when elem(hd(elem(node, 1)), 1) == :work
-  
-  defguard is_kw_wrapper(node) when elem(hd(elem(node, 1)), 1) == :wrapper
-  
-  defguard is_kw_write(node) when elem(hd(elem(node, 1)), 1) == :write
-  
-  defguard is_kw_zone(node) when elem(hd(elem(node, 1)), 1) == :zone
+  defguard is_z(b) when b == 122 or b == 90
   
 
   
@@ -2672,151 +1378,151 @@ defmodule SQL.Helpers do
   def tag([[[[[], b1], b2], b3], b4]) when is_z(b1) and is_o(b2) and is_n(b3) and is_e(b4), do: {:non_reserved, :zone}
   
   
-  def tag([[[[], ?^], ?-], ?=]), do: :"^-="
+  def tag([[[[], ?^], ?-], ?=]), do: {:operator, :"^-="}
   
-  def tag([[[[], ?<], ?=], ?>]), do: :"<=>"
+  def tag([[[[], ?<], ?=], ?>]), do: {:operator, :"<=>"}
   
-  def tag([[[[], ?-], ?>], ?>]), do: :"->>"
+  def tag([[[[], ?-], ?>], ?>]), do: {:operator, :"->>"}
   
-  def tag([[[[], ?|], ?|], ?/]), do: :"||/"
+  def tag([[[[], ?|], ?|], ?/]), do: {:operator, :"||/"}
   
-  def tag([[[[], ?!], ?~], ?*]), do: :"!~*"
+  def tag([[[[], ?!], ?~], ?*]), do: {:operator, :"!~*"}
   
-  def tag([[[[], ?<], ?<], ?|]), do: :"<<|"
+  def tag([[[[], ?<], ?<], ?|]), do: {:operator, :"<<|"}
   
-  def tag([[[[], ?|], ?>], ?>]), do: :"|>>"
+  def tag([[[[], ?|], ?>], ?>]), do: {:operator, :"|>>"}
   
-  def tag([[[[], ?&], ?<], ?|]), do: :"&<|"
+  def tag([[[[], ?&], ?<], ?|]), do: {:operator, :"&<|"}
   
-  def tag([[[[], ?|], ?&], ?>]), do: :"|&>"
+  def tag([[[[], ?|], ?&], ?>]), do: {:operator, :"|&>"}
   
-  def tag([[[[], ??], ?-], ?|]), do: :"?-|"
+  def tag([[[[], ??], ?-], ?|]), do: {:operator, :"?-|"}
   
-  def tag([[[[], ??], ?|], ?|]), do: :"?||"
+  def tag([[[[], ??], ?|], ?|]), do: {:operator, :"?||"}
   
-  def tag([[[[], ?<], ?<], ?=]), do: :"<<="
+  def tag([[[[], ?<], ?<], ?=]), do: {:operator, :"<<="}
   
-  def tag([[[[], ?>], ?>], ?=]), do: :">>="
+  def tag([[[[], ?>], ?>], ?=]), do: {:operator, :">>="}
   
-  def tag([[[[], ?#], ?>], ?>]), do: :"#>>"
+  def tag([[[[], ?#], ?>], ?>]), do: {:operator, :"#>>"}
   
-  def tag([[[[], ?-], ?|], ?-]), do: :"-|-"
+  def tag([[[[], ?-], ?|], ?-]), do: {:operator, :"-|-"}
   
-  def tag([[[], ?&], ?&]), do: :&&
+  def tag([[[], ?&], ?&]), do: {:operator, :&&}
   
-  def tag([[[], ?|], ?|]), do: :||
+  def tag([[[], ?|], ?|]), do: {:operator, :||}
   
-  def tag([[[], ?&], ?=]), do: :"&="
+  def tag([[[], ?&], ?=]), do: {:operator, :"&="}
   
-  def tag([[[], ?^], ?=]), do: :"^="
+  def tag([[[], ?^], ?=]), do: {:operator, :"^="}
   
-  def tag([[[], ?|], ?=]), do: :"|="
+  def tag([[[], ?|], ?=]), do: {:operator, :"|="}
   
-  def tag([[[[], ?|], ?*], ?=]), do: :"|*="
+  def tag([[[[], ?|], ?*], ?=]), do: {:operator, :"|*="}
   
-  def tag([[[], ?>], ?>]), do: :">>"
+  def tag([[[], ?>], ?>]), do: {:operator, :">>"}
   
-  def tag([[[], ?<], ?<]), do: :"<<"
+  def tag([[[], ?<], ?<]), do: {:operator, :"<<"}
   
-  def tag([[[], ?-], ?>]), do: :->
+  def tag([[[], ?-], ?>]), do: {:operator, :->}
   
-  def tag([[[], ?:], ?=]), do: :":="
+  def tag([[[], ?:], ?=]), do: {:operator, :":="}
   
-  def tag([[[], ?+], ?=]), do: :"+="
+  def tag([[[], ?+], ?=]), do: {:operator, :"+="}
   
-  def tag([[[], ?-], ?=]), do: :"-="
+  def tag([[[], ?-], ?=]), do: {:operator, :"-="}
   
-  def tag([[[], ?*], ?=]), do: :"*="
+  def tag([[[], ?*], ?=]), do: {:operator, :"*="}
   
-  def tag([[[], ?/], ?=]), do: :"/="
+  def tag([[[], ?/], ?=]), do: {:operator, :"/="}
   
-  def tag([[[], ?%], ?=]), do: :"%="
+  def tag([[[], ?%], ?=]), do: {:operator, :"%="}
   
-  def tag([[[], ?!], ?>]), do: :"!>"
+  def tag([[[], ?!], ?>]), do: {:operator, :"!>"}
   
-  def tag([[[], ?!], ?<]), do: :"!<"
+  def tag([[[], ?!], ?<]), do: {:operator, :"!<"}
   
-  def tag([[[], ?@], ?>]), do: :"@>"
+  def tag([[[], ?@], ?>]), do: {:operator, :"@>"}
   
-  def tag([[[], ?<], ?@]), do: :"<@"
+  def tag([[[], ?<], ?@]), do: {:operator, :"<@"}
   
-  def tag([[[], ?|], ?/]), do: :"|/"
+  def tag([[[], ?|], ?/]), do: {:operator, :"|/"}
   
-  def tag([[[], ?^], ?@]), do: :"^@"
+  def tag([[[], ?^], ?@]), do: {:operator, :"^@"}
   
-  def tag([[[], ?~], ?*]), do: :"~*"
+  def tag([[[], ?~], ?*]), do: {:operator, :"~*"}
   
-  def tag([[[], ?!], ?~]), do: :"!~"
+  def tag([[[], ?!], ?~]), do: {:operator, :"!~"}
   
-  def tag([[[], ?#], ?#]), do: :"##"
+  def tag([[[], ?#], ?#]), do: {:operator, :"##"}
   
-  def tag([[[], ?&], ?<]), do: :"&<"
+  def tag([[[], ?&], ?<]), do: {:operator, :"&<"}
   
-  def tag([[[], ?&], ?>]), do: :"&>"
+  def tag([[[], ?&], ?>]), do: {:operator, :"&>"}
   
-  def tag([[[], ?<], ?^]), do: :"<^"
+  def tag([[[], ?<], ?^]), do: {:operator, :"<^"}
   
-  def tag([[[], ?>], ?^]), do: :">^"
+  def tag([[[], ?>], ?^]), do: {:operator, :">^"}
   
-  def tag([[[], ??], ?#]), do: :"?#"
+  def tag([[[], ??], ?#]), do: {:operator, :"?#"}
   
-  def tag([[[], ??], ?-]), do: :"?-"
+  def tag([[[], ??], ?-]), do: {:operator, :"?-"}
   
-  def tag([[[], ??], ?|]), do: :"?|"
+  def tag([[[], ??], ?|]), do: {:operator, :"?|"}
   
-  def tag([[[], ?~], ?=]), do: :"~="
+  def tag([[[], ?~], ?=]), do: {:operator, :"~="}
   
-  def tag([[[], ?@], ?@]), do: :"@@"
+  def tag([[[], ?@], ?@]), do: {:operator, :"@@"}
   
-  def tag([[[], ?!], ?!]), do: :"!!"
+  def tag([[[], ?!], ?!]), do: {:operator, :"!!"}
   
-  def tag([[[], ?#], ?>]), do: :"#>"
+  def tag([[[], ?#], ?>]), do: {:operator, :"#>"}
   
-  def tag([[[], ??], ?&]), do: :"?&"
+  def tag([[[], ??], ?&]), do: {:operator, :"?&"}
   
-  def tag([[[], ?#], ?-]), do: :"#-"
+  def tag([[[], ?#], ?-]), do: {:operator, :"#-"}
   
-  def tag([[[], ?@], ??]), do: :"@?"
+  def tag([[[], ?@], ??]), do: {:operator, :"@?"}
   
-  def tag([[[], ?:], ?:]), do: :"::"
+  def tag([[[], ?:], ?:]), do: {:operator, :"::"}
   
-  def tag([[[], ?<], ?>]), do: :<>
+  def tag([[[], ?<], ?>]), do: {:operator, :<>}
   
-  def tag([[[], ?>], ?=]), do: :>=
+  def tag([[[], ?>], ?=]), do: {:operator, :>=}
   
-  def tag([[[], ?<], ?=]), do: :<=
+  def tag([[[], ?<], ?=]), do: {:operator, :<=}
   
-  def tag([[[], ?!], ?=]), do: :!=
+  def tag([[[], ?!], ?=]), do: {:operator, :!=}
   
-  def tag([[], ?+]), do: :+
+  def tag([[], ?+]), do: {:operator, :+}
   
-  def tag([[], ?-]), do: :-
+  def tag([[], ?-]), do: {:operator, :-}
   
-  def tag([[], ?!]), do: :!
+  def tag([[], ?!]), do: {:operator, :!}
   
-  def tag([[], ?&]), do: :&
+  def tag([[], ?&]), do: {:operator, :&}
   
-  def tag([[], ?^]), do: :^
+  def tag([[], ?^]), do: {:operator, :^}
   
-  def tag([[], ?|]), do: :|
+  def tag([[], ?|]), do: {:operator, :|}
   
-  def tag([[], ?~]), do: :"~"
+  def tag([[], ?~]), do: {:operator, :"~"}
   
-  def tag([[], ?%]), do: :%
+  def tag([[], ?%]), do: {:operator, :%}
   
-  def tag([[], ?@]), do: :@
+  def tag([[], ?@]), do: {:operator, :@}
   
-  def tag([[], ?#]), do: :"#"
+  def tag([[], ?#]), do: {:operator, :"#"}
   
-  def tag([[], ?*]), do: :*
+  def tag([[], ?*]), do: {:operator, :*}
   
-  def tag([[], ?/]), do: :/
+  def tag([[], ?/]), do: {:operator, :/}
   
-  def tag([[], ?=]), do: :=
+  def tag([[], ?=]), do: {:operator, :=}
   
-  def tag([[], ?>]), do: :>
+  def tag([[], ?>]), do: {:operator, :>}
   
-  def tag([[], ?<]), do: :<
+  def tag([[], ?<]), do: {:operator, :<}
   
   def tag(_), do: nil
 end

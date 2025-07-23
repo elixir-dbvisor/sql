@@ -75,7 +75,8 @@ defmodule Mix.Tasks.Sql.Gen.Helpers do
     ]
     rules = SQL.BNF.parse(%{
     "<reserved word>" => ~w[| LIMIT | ILIKE | BACKWARD | FORWARD | ISNULL | NOTNULL],
-    operators: operators
+    operators: operators,
+    download: true
     })
     enclosed = [
       {:double_quote, [type: :literal], ["\"", "\""]},
@@ -98,7 +99,7 @@ defmodule Mix.Tasks.Sql.Gen.Helpers do
     whitespace = Enum.map(rules.terminals["<whitespace>"], fn <<c::utf8>> -> c end)
     newline = Enum.map(rules.terminals["<newline>"], fn <<c::utf8>> -> c end)
     reserved = rules.keywords["<reserved word>"] ++ rules.keywords["<SQL/JSON key word>"]
-    create_file("lib/helpers.ex", helpers_template([mod: SQL.Lexer, reserved: Enum.uniq(reserved), non_reserved: Enum.uniq(rules.keywords["<non-reserved word>"]), nested_start: ~c"#{elem(exprs, 1)}", nested_end: ~c"#{elem(exprs, 2)}", special_characters: ~c"#{Enum.map(rules.special_characters, &elem(&1, 1))}*/", operators: Enum.uniq(Enum.flat_map(rules.operators, &elem(&1, 1))), digits: ~c"#{rules.digits["<digit>"]}", exprs: exprs, space: space, whitespace: whitespace, newline: newline]))
+    create_file("lib/helpers.ex", helpers_template([mod: SQL.Lexer, reserved: Enum.uniq(reserved), non_reserved: Enum.uniq(rules.keywords["<non-reserved word>"]), nested_start: ~c"#{elem(exprs, 1)}", nested_end: ~c"#{elem(exprs, 2)}", special_characters: ~c"#{Enum.uniq(Enum.map(rules.special_characters, &elem(&1, 1)))}", operators: Enum.uniq(Enum.flat_map(rules.operators, &elem(&1, 1))), digits: ~c"#{rules.digits["<digit>"]}", exprs: exprs, space: space, whitespace: whitespace, newline: newline]))
   end
 
   embed_template(:helpers, """
@@ -111,23 +112,18 @@ defmodule Mix.Tasks.Sql.Gen.Helpers do
     defguard is_newline(b) when b in <%= inspect @newline %>
     defguard is_space(b) when b in <%= inspect @space %>
     defguard is_whitespace(b) when b in <%= inspect @whitespace %>
-    defguard is_literal(b) when b in ~c{"'`}
+    defguard is_literal(b) when b == ?" or b == ?' or b == ?`
     defguard is_expr(b) when b in <%= inspect elem(@exprs, 0) %>
     defguard is_nested_start(b) when b in <%= inspect @nested_start %>
     defguard is_nested_end(b) when b in <%= inspect @nested_end %>
     defguard is_special_character(b) when b in <%= inspect @special_characters %>
     defguard is_digit(b) when b in <%= inspect @digits %>
     defguard is_comment(b) when b in ["--", "/*"]
-    defguard is_sign(b) when b in ~c"-+"
+    defguard is_sign(b) when b == ?- or b == ?+
     defguard is_dot(b) when b == ?.
-    defguard is_delimiter(b) when b in ~c";,"
-    # defguard is_operator(node) when elem(node, 0) in ~w"<%= Enum.map_join(@operators, " ", &Atom.to_string(elem(&1, 0))) %>"a
-    defguard is_operator(node) when elem(hd(elem(node, 1)), 0) == :operator
+    defguard is_delimiter(b) when b == ?; or b == ?,
     <%= for letter <- Enum.to_list(?a..?z) do %>
-    defguard is_<%= [letter] %>(b) when b in <%= inspect [letter | :string.uppercase([letter])] %>
-    <% end %>
-    <%= for {atom, _, _} <- Enum.uniq(@reserved ++ @non_reserved) do %>
-    defguard is_kw_<%= String.replace(Atom.to_string(atom), "-", "_") %>(node) when elem(hd(elem(node, 1)), 1) == <%= inspect(atom) %>
+    defguard is_<%= [letter] %>(b) when b == <%= inspect letter %> or b == <%= inspect hd(:string.uppercase([letter])) %>
     <% end %>
 
     <%= for {atom, match, guard} <- @reserved do %>

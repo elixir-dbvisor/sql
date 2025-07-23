@@ -3,7 +3,7 @@
 
 defmodule SQL.Lexer do
   @moduledoc false
-  import SQL.Helpers
+  import SQL.Helpers, only: [is_comment: 1, is_delimiter: 1, is_digit: 1, is_dot: 1, is_e: 1, is_literal: 1, is_nested_end: 1, is_nested_start: 1, is_newline: 1, is_sign: 1, is_space: 1, is_special_character: 1, is_whitespace: 1, tag: 1]
   @compile {:inline, lex: 12, update_state: 17, node: 6, type: 2, type: 1}
   require Unicode.Set
   def lex(binary, file \\ "nofile", params \\ 0, binding \\ [], aliases \\ []) do
@@ -108,7 +108,7 @@ defmodule SQL.Lexer do
   def lex(<<b, e, rest::binary>>, file, params, binding, aliases, line, column, :numeric=type, data, meta, acc, n) when is_e(b) and (is_sign(e) or is_digit(e)) do
     lex(rest, file, params, binding, aliases, line, column+2, type, [[data|[b]]|[e]], meta, acc, n)
   end
-  def lex(<<b, e, rest::binary>>, file, params, binding, aliases, line, column, nil, []=data, nil, acc, n) when is_dot(b) and is_digit(e)do
+  def lex(<<b, e, rest::binary>>, file, params, binding, aliases, line, column, nil, []=data, nil, acc, n) when is_dot(b) and is_digit(e) do
     lex(rest, file, params, binding, aliases, line, column+2, :numeric, [[data|[b]]|[e]], {0, 0, 1}, acc, n)
   end
   def lex(<<b, e, rest::binary>>, file, params, binding, aliases, line, column, nil, []=data, nil, acc, n) when is_sign(b) and is_dot(e) do
@@ -207,11 +207,10 @@ defmodule SQL.Lexer do
 
   def node(:double_braces=_tag, line, column, data, _meta, file), do: {:binding, [type: :literal, line: line, column: column, file: file], data}
   def node(:numeric=tag, line, column, data, {s, w, f}, file), do: {tag, [sign: s, whole: w, fractional: f,  type: :literal, line: line, column: column, file: file], data}
-  def node(:special=type, line, column, data, meta, file) do
-    if tag = tag(data) do
-      node(tag, line, column, [], meta, file)
-    else
-      node(type, line, column, data, meta, file)
+  def node(:special=tag, line, column, data, _meta, file) do
+    case tag(data) do
+      {:operator = t, tag} -> {tag, [type: t, line: line, column: column, file: file], []}
+      _ -> {tag, [size: :erlang.iolist_size(data), type: :literal, line: line, column: column, file: file], data}
     end
   end
   def node(:quote = tag, line, column, data, prefix, file) when is_list(prefix), do: {tag, [prefix: prefix, size: :erlang.iolist_size(data), type: :literal, line: line, column: column, file: file], data}
