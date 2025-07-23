@@ -7,68 +7,68 @@ defmodule SQL.Helpers do
   defguard is_newline(b) when b in [10, 11, 12, 13, 133, 8232, 8233]
   defguard is_space(b) when b in ~c" "
   defguard is_whitespace(b) when b in [9, 13, 160, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8239, 8287, 12288, 6158, 8203, 8204, 8205, 8288, 65279]
-  defguard is_literal(b) when b == ?" or b == ?' or b == ?`
+  defguard is_literal(b) when b in ~c{"'`}
   defguard is_expr(b) when b in [:paren, :bracket, :brace]
   defguard is_nested_start(b) when b in ~c"([{"
   defguard is_nested_end(b) when b in ~c")]}"
   defguard is_special_character(b) when b in ~c" \"%&'()*+,-./:;<=>?[]^_|{}$@!~#"
   defguard is_digit(b) when b in ~c"0123456789"
   defguard is_comment(b) when b in ["--", "/*"]
-  defguard is_sign(b) when b == ?- or b == ?+
+  defguard is_sign(b) when b in ~c"-+"
   defguard is_dot(b) when b == ?.
-  defguard is_delimiter(b) when b == ?; or b == ?,
+  defguard is_delimiter(b) when b in ~c";,"
   
-  defguard is_a(b) when b == 97 or b == 65
+  defguard is_a(b) when b in ~c"aA"
   
-  defguard is_b(b) when b == 98 or b == 66
+  defguard is_b(b) when b in ~c"bB"
   
-  defguard is_c(b) when b == 99 or b == 67
+  defguard is_c(b) when b in ~c"cC"
   
-  defguard is_d(b) when b == 100 or b == 68
+  defguard is_d(b) when b in ~c"dD"
   
-  defguard is_e(b) when b == 101 or b == 69
+  defguard is_e(b) when b in ~c"eE"
   
-  defguard is_f(b) when b == 102 or b == 70
+  defguard is_f(b) when b in ~c"fF"
   
-  defguard is_g(b) when b == 103 or b == 71
+  defguard is_g(b) when b in ~c"gG"
   
-  defguard is_h(b) when b == 104 or b == 72
+  defguard is_h(b) when b in ~c"hH"
   
-  defguard is_i(b) when b == 105 or b == 73
+  defguard is_i(b) when b in ~c"iI"
   
-  defguard is_j(b) when b == 106 or b == 74
+  defguard is_j(b) when b in ~c"jJ"
   
-  defguard is_k(b) when b == 107 or b == 75
+  defguard is_k(b) when b in ~c"kK"
   
-  defguard is_l(b) when b == 108 or b == 76
+  defguard is_l(b) when b in ~c"lL"
   
-  defguard is_m(b) when b == 109 or b == 77
+  defguard is_m(b) when b in ~c"mM"
   
-  defguard is_n(b) when b == 110 or b == 78
+  defguard is_n(b) when b in ~c"nN"
   
-  defguard is_o(b) when b == 111 or b == 79
+  defguard is_o(b) when b in ~c"oO"
   
-  defguard is_p(b) when b == 112 or b == 80
+  defguard is_p(b) when b in ~c"pP"
   
-  defguard is_q(b) when b == 113 or b == 81
+  defguard is_q(b) when b in ~c"qQ"
   
-  defguard is_r(b) when b == 114 or b == 82
+  defguard is_r(b) when b in ~c"rR"
   
-  defguard is_s(b) when b == 115 or b == 83
+  defguard is_s(b) when b in ~c"sS"
   
-  defguard is_t(b) when b == 116 or b == 84
+  defguard is_t(b) when b in ~c"tT"
   
-  defguard is_u(b) when b == 117 or b == 85
+  defguard is_u(b) when b in ~c"uU"
   
-  defguard is_v(b) when b == 118 or b == 86
+  defguard is_v(b) when b in ~c"vV"
   
-  defguard is_w(b) when b == 119 or b == 87
+  defguard is_w(b) when b in ~c"wW"
   
-  defguard is_x(b) when b == 120 or b == 88
+  defguard is_x(b) when b in ~c"xX"
   
-  defguard is_y(b) when b == 121 or b == 89
+  defguard is_y(b) when b in ~c"yY"
   
-  defguard is_z(b) when b == 122 or b == 90
+  defguard is_z(b) when b in ~c"zZ"
   
 
   
@@ -1378,151 +1378,151 @@ defmodule SQL.Helpers do
   def tag([[[[[], b1], b2], b3], b4]) when is_z(b1) and is_o(b2) and is_n(b3) and is_e(b4), do: {:non_reserved, :zone}
   
   
-  def tag([[[[], ?^], ?-], ?=]), do: {:operator, :"^-="}
+  def tag([[[[], ?^], ?-], ?=]), do: :"^-="
   
-  def tag([[[[], ?<], ?=], ?>]), do: {:operator, :"<=>"}
+  def tag([[[[], ?<], ?=], ?>]), do: :"<=>"
   
-  def tag([[[[], ?-], ?>], ?>]), do: {:operator, :"->>"}
+  def tag([[[[], ?-], ?>], ?>]), do: :"->>"
   
-  def tag([[[[], ?|], ?|], ?/]), do: {:operator, :"||/"}
+  def tag([[[[], ?|], ?|], ?/]), do: :"||/"
   
-  def tag([[[[], ?!], ?~], ?*]), do: {:operator, :"!~*"}
+  def tag([[[[], ?!], ?~], ?*]), do: :"!~*"
   
-  def tag([[[[], ?<], ?<], ?|]), do: {:operator, :"<<|"}
+  def tag([[[[], ?<], ?<], ?|]), do: :"<<|"
   
-  def tag([[[[], ?|], ?>], ?>]), do: {:operator, :"|>>"}
+  def tag([[[[], ?|], ?>], ?>]), do: :"|>>"
   
-  def tag([[[[], ?&], ?<], ?|]), do: {:operator, :"&<|"}
+  def tag([[[[], ?&], ?<], ?|]), do: :"&<|"
   
-  def tag([[[[], ?|], ?&], ?>]), do: {:operator, :"|&>"}
+  def tag([[[[], ?|], ?&], ?>]), do: :"|&>"
   
-  def tag([[[[], ??], ?-], ?|]), do: {:operator, :"?-|"}
+  def tag([[[[], ??], ?-], ?|]), do: :"?-|"
   
-  def tag([[[[], ??], ?|], ?|]), do: {:operator, :"?||"}
+  def tag([[[[], ??], ?|], ?|]), do: :"?||"
   
-  def tag([[[[], ?<], ?<], ?=]), do: {:operator, :"<<="}
+  def tag([[[[], ?<], ?<], ?=]), do: :"<<="
   
-  def tag([[[[], ?>], ?>], ?=]), do: {:operator, :">>="}
+  def tag([[[[], ?>], ?>], ?=]), do: :">>="
   
-  def tag([[[[], ?#], ?>], ?>]), do: {:operator, :"#>>"}
+  def tag([[[[], ?#], ?>], ?>]), do: :"#>>"
   
-  def tag([[[[], ?-], ?|], ?-]), do: {:operator, :"-|-"}
+  def tag([[[[], ?-], ?|], ?-]), do: :"-|-"
   
-  def tag([[[], ?&], ?&]), do: {:operator, :&&}
+  def tag([[[], ?&], ?&]), do: :&&
   
-  def tag([[[], ?|], ?|]), do: {:operator, :||}
+  def tag([[[], ?|], ?|]), do: :||
   
-  def tag([[[], ?&], ?=]), do: {:operator, :"&="}
+  def tag([[[], ?&], ?=]), do: :"&="
   
-  def tag([[[], ?^], ?=]), do: {:operator, :"^="}
+  def tag([[[], ?^], ?=]), do: :"^="
   
-  def tag([[[], ?|], ?=]), do: {:operator, :"|="}
+  def tag([[[], ?|], ?=]), do: :"|="
   
-  def tag([[[[], ?|], ?*], ?=]), do: {:operator, :"|*="}
+  def tag([[[[], ?|], ?*], ?=]), do: :"|*="
   
-  def tag([[[], ?>], ?>]), do: {:operator, :">>"}
+  def tag([[[], ?>], ?>]), do: :">>"
   
-  def tag([[[], ?<], ?<]), do: {:operator, :"<<"}
+  def tag([[[], ?<], ?<]), do: :"<<"
   
-  def tag([[[], ?-], ?>]), do: {:operator, :->}
+  def tag([[[], ?-], ?>]), do: :->
   
-  def tag([[[], ?:], ?=]), do: {:operator, :":="}
+  def tag([[[], ?:], ?=]), do: :":="
   
-  def tag([[[], ?+], ?=]), do: {:operator, :"+="}
+  def tag([[[], ?+], ?=]), do: :"+="
   
-  def tag([[[], ?-], ?=]), do: {:operator, :"-="}
+  def tag([[[], ?-], ?=]), do: :"-="
   
-  def tag([[[], ?*], ?=]), do: {:operator, :"*="}
+  def tag([[[], ?*], ?=]), do: :"*="
   
-  def tag([[[], ?/], ?=]), do: {:operator, :"/="}
+  def tag([[[], ?/], ?=]), do: :"/="
   
-  def tag([[[], ?%], ?=]), do: {:operator, :"%="}
+  def tag([[[], ?%], ?=]), do: :"%="
   
-  def tag([[[], ?!], ?>]), do: {:operator, :"!>"}
+  def tag([[[], ?!], ?>]), do: :"!>"
   
-  def tag([[[], ?!], ?<]), do: {:operator, :"!<"}
+  def tag([[[], ?!], ?<]), do: :"!<"
   
-  def tag([[[], ?@], ?>]), do: {:operator, :"@>"}
+  def tag([[[], ?@], ?>]), do: :"@>"
   
-  def tag([[[], ?<], ?@]), do: {:operator, :"<@"}
+  def tag([[[], ?<], ?@]), do: :"<@"
   
-  def tag([[[], ?|], ?/]), do: {:operator, :"|/"}
+  def tag([[[], ?|], ?/]), do: :"|/"
   
-  def tag([[[], ?^], ?@]), do: {:operator, :"^@"}
+  def tag([[[], ?^], ?@]), do: :"^@"
   
-  def tag([[[], ?~], ?*]), do: {:operator, :"~*"}
+  def tag([[[], ?~], ?*]), do: :"~*"
   
-  def tag([[[], ?!], ?~]), do: {:operator, :"!~"}
+  def tag([[[], ?!], ?~]), do: :"!~"
   
-  def tag([[[], ?#], ?#]), do: {:operator, :"##"}
+  def tag([[[], ?#], ?#]), do: :"##"
   
-  def tag([[[], ?&], ?<]), do: {:operator, :"&<"}
+  def tag([[[], ?&], ?<]), do: :"&<"
   
-  def tag([[[], ?&], ?>]), do: {:operator, :"&>"}
+  def tag([[[], ?&], ?>]), do: :"&>"
   
-  def tag([[[], ?<], ?^]), do: {:operator, :"<^"}
+  def tag([[[], ?<], ?^]), do: :"<^"
   
-  def tag([[[], ?>], ?^]), do: {:operator, :">^"}
+  def tag([[[], ?>], ?^]), do: :">^"
   
-  def tag([[[], ??], ?#]), do: {:operator, :"?#"}
+  def tag([[[], ??], ?#]), do: :"?#"
   
-  def tag([[[], ??], ?-]), do: {:operator, :"?-"}
+  def tag([[[], ??], ?-]), do: :"?-"
   
-  def tag([[[], ??], ?|]), do: {:operator, :"?|"}
+  def tag([[[], ??], ?|]), do: :"?|"
   
-  def tag([[[], ?~], ?=]), do: {:operator, :"~="}
+  def tag([[[], ?~], ?=]), do: :"~="
   
-  def tag([[[], ?@], ?@]), do: {:operator, :"@@"}
+  def tag([[[], ?@], ?@]), do: :"@@"
   
-  def tag([[[], ?!], ?!]), do: {:operator, :"!!"}
+  def tag([[[], ?!], ?!]), do: :"!!"
   
-  def tag([[[], ?#], ?>]), do: {:operator, :"#>"}
+  def tag([[[], ?#], ?>]), do: :"#>"
   
-  def tag([[[], ??], ?&]), do: {:operator, :"?&"}
+  def tag([[[], ??], ?&]), do: :"?&"
   
-  def tag([[[], ?#], ?-]), do: {:operator, :"#-"}
+  def tag([[[], ?#], ?-]), do: :"#-"
   
-  def tag([[[], ?@], ??]), do: {:operator, :"@?"}
+  def tag([[[], ?@], ??]), do: :"@?"
   
-  def tag([[[], ?:], ?:]), do: {:operator, :"::"}
+  def tag([[[], ?:], ?:]), do: :"::"
   
-  def tag([[[], ?<], ?>]), do: {:operator, :<>}
+  def tag([[[], ?<], ?>]), do: :<>
   
-  def tag([[[], ?>], ?=]), do: {:operator, :>=}
+  def tag([[[], ?>], ?=]), do: :>=
   
-  def tag([[[], ?<], ?=]), do: {:operator, :<=}
+  def tag([[[], ?<], ?=]), do: :<=
   
-  def tag([[[], ?!], ?=]), do: {:operator, :!=}
+  def tag([[[], ?!], ?=]), do: :!=
   
-  def tag([[], ?+]), do: {:operator, :+}
+  def tag([[], ?+]), do: :+
   
-  def tag([[], ?-]), do: {:operator, :-}
+  def tag([[], ?-]), do: :-
   
-  def tag([[], ?!]), do: {:operator, :!}
+  def tag([[], ?!]), do: :!
   
-  def tag([[], ?&]), do: {:operator, :&}
+  def tag([[], ?&]), do: :&
   
-  def tag([[], ?^]), do: {:operator, :^}
+  def tag([[], ?^]), do: :^
   
-  def tag([[], ?|]), do: {:operator, :|}
+  def tag([[], ?|]), do: :|
   
-  def tag([[], ?~]), do: {:operator, :"~"}
+  def tag([[], ?~]), do: :"~"
   
-  def tag([[], ?%]), do: {:operator, :%}
+  def tag([[], ?%]), do: :%
   
-  def tag([[], ?@]), do: {:operator, :@}
+  def tag([[], ?@]), do: :@
   
-  def tag([[], ?#]), do: {:operator, :"#"}
+  def tag([[], ?#]), do: :"#"
   
-  def tag([[], ?*]), do: {:operator, :*}
+  def tag([[], ?*]), do: :*
   
-  def tag([[], ?/]), do: {:operator, :/}
+  def tag([[], ?/]), do: :/
   
-  def tag([[], ?=]), do: {:operator, :=}
+  def tag([[], ?=]), do: :=
   
-  def tag([[], ?>]), do: {:operator, :>}
+  def tag([[], ?>]), do: :>
   
-  def tag([[], ?<]), do: {:operator, :<}
+  def tag([[], ?<]), do: :<
   
   def tag(_), do: nil
 end

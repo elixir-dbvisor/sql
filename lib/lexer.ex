@@ -117,10 +117,10 @@ defmodule SQL.Lexer do
   def lex(<<b, e, rest::binary>>, file, params, binding, aliases, line, column, :numeric=type, data, {s, w, f}, acc, n) when is_dot(b) and is_digit(e) do
     lex(rest, file, params, binding, aliases, line, column+2, type, [[data|[b]]|[e]], {s, w, f+1}, acc, n)
   end
-  def lex(<<b, c, rest::binary>>, file, params, binding, aliases, line, column, nil, []=data, nil, [{t, m, _}|_]=acc, n) when is_sign(b) and is_digit(c) and t not in ~w[ident numeric dot] and elem(hd(m), 0) == :keyword  do
+  def lex(<<b, c, rest::binary>>, file, params, binding, aliases, line, column, nil, []=data, nil, [{t, [{:type, tm}|_], _}|_]=acc, n) when is_sign(b) and is_digit(c) and t not in ~w[ident numeric dot]a and tm in ~w[reserved non_reserved]a  do
     lex(rest, file, params, binding, aliases, line, column+2, :numeric, [[data|[b]]|[c]], {1, 1, 0}, acc, n)
   end
-  def lex(<<b, rest::binary>>, file, params, binding, aliases, line, column, type, data, meta, acc, n) when type in [nil, :numeric] and is_digit(b) do
+  def lex(<<b, rest::binary>>, file, params, binding, aliases, line, column, type, data, meta, acc, n) when type in ~w[nil numeric]a and is_digit(b) do
     lex(rest, file, params, binding, aliases, line, column+1, :numeric, [data|[b]], update_meta(meta, :numeric), acc, n)
   end
   def lex(<<b, rest::binary>>, file, params, binding, aliases, line, column, :special=type, data, meta, acc, n) when is_digit(b) do
@@ -206,26 +206,26 @@ defmodule SQL.Lexer do
 
 
   def node(:double_braces=_tag, line, column, data, _meta, file), do: {:binding, [type: :literal, line: line, column: column, file: file], data}
-  def node(:numeric=tag, line, column, data, {s, w, f}, file), do: {tag, [sign: s, whole: w, fractional: f,  type: :literal, line: line, column: column, file: file], data}
-  def node(:special=tag, line, column, data, _meta, file) do
+  def node(:numeric=tag, line, column, data, {s, w, f}, file), do: {tag, [type: :literal, sign: s, whole: w, fractional: f, line: line, column: column, file: file], data}
+  def node(:special, line, column, data, _meta, file) do
     case tag(data) do
-      {:operator = t, tag} -> {tag, [type: t, line: line, column: column, file: file], []}
-      _ -> {tag, [size: :erlang.iolist_size(data), type: :literal, line: line, column: column, file: file], data}
+      nil -> {:ident, [type: :literal, line: line, column: column, file: file], data}
+      tag -> {tag, [type: :operator, line: line, column: column, file: file], []}
     end
   end
-  def node(:quote = tag, line, column, data, prefix, file) when is_list(prefix), do: {tag, [prefix: prefix, size: :erlang.iolist_size(data), type: :literal, line: line, column: column, file: file], data}
+  def node(:quote = tag, line, column, data, prefix, file) when is_list(prefix), do: {tag, [prefix: prefix, type: :literal, line: line, column: column, file: file], data}
   def node(tag, line, column, data, _meta, file) when tag in ~w[bracket paren brace]a, do: {tag, [type: :expression, line: line, column: column, file: file], data}
-  def node(tag, line, column, data, _meta, file) when tag in ~w[quote double_quote backtick]a, do: {tag, [size: :erlang.iolist_size(data), type: :literal, line: line, column: column, file: file], data}
+  def node(tag, line, column, data, _meta, file) when tag in ~w[quote double_quote backtick]a, do: {tag, [type: :literal, line: line, column: column, file: file], data}
   def node(tag, line, column, []=data, _meta, file), do: {tag, [line: line, column: column, file: file], data}
   def node(tag, line, column, [{_, _, _} | _]=data, _meta, file), do: {tag, [type: :expression, line: line, column: column, file: file], data}
   def node(tag, line, column, data, nil, file) do
     case tag(data) do
-      {:reserved = k, tag} -> {tag, [keyword: k, line: line, column: column, file: file], []}
-      {k, t} -> {tag, [keyword: k, tag: t, line: line, column: column, file: file], data}
-      _ -> {tag, [size: :erlang.iolist_size(data), type: :literal, line: line, column: column, file: file], data}
+      {:reserved = k, tag} -> {tag, [type: k, line: line, column: column, file: file], []}
+      {k, t} -> {tag, [type: k, tag: t, line: line, column: column, file: file], data}
+      _ -> {tag, [type: :literal, line: line, column: column, file: file], data}
     end
   end
-  def node(tag, line, column, data, _meta, file), do: {tag, [size: :erlang.iolist_size(data), type: :literal, line: line, column: column, file: file], data}
+  def node(tag, line, column, data, _meta, file), do: {tag, [type: :literal, line: line, column: column, file: file], data}
 
   def type(?"), do: :double_quote
   def type(?'), do: :quote

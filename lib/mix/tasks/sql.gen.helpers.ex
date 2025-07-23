@@ -112,18 +112,18 @@ defmodule Mix.Tasks.Sql.Gen.Helpers do
     defguard is_newline(b) when b in <%= inspect @newline %>
     defguard is_space(b) when b in <%= inspect @space %>
     defguard is_whitespace(b) when b in <%= inspect @whitespace %>
-    defguard is_literal(b) when b == ?" or b == ?' or b == ?`
+    defguard is_literal(b) when b in ~c{"'`}
     defguard is_expr(b) when b in <%= inspect elem(@exprs, 0) %>
     defguard is_nested_start(b) when b in <%= inspect @nested_start %>
     defguard is_nested_end(b) when b in <%= inspect @nested_end %>
     defguard is_special_character(b) when b in <%= inspect @special_characters %>
     defguard is_digit(b) when b in <%= inspect @digits %>
     defguard is_comment(b) when b in ["--", "/*"]
-    defguard is_sign(b) when b == ?- or b == ?+
+    defguard is_sign(b) when b in ~c"-+"
     defguard is_dot(b) when b == ?.
-    defguard is_delimiter(b) when b == ?; or b == ?,
+    defguard is_delimiter(b) when b in ~c";,"
     <%= for letter <- Enum.to_list(?a..?z) do %>
-    defguard is_<%= [letter] %>(b) when b == <%= inspect letter %> or b == <%= inspect hd(:string.uppercase([letter])) %>
+    defguard is_<%= [letter] %>(b) when b in <%= inspect [letter | :string.uppercase([letter])] %>
     <% end %>
 
     <%= for {atom, match, guard} <- @reserved do %>
@@ -133,7 +133,7 @@ defmodule Mix.Tasks.Sql.Gen.Helpers do
     def tag(<%= match %>) when <%= guard %>, do: {:non_reserved, <%= inspect(atom) %>}
     <% end %>
     <%= for {atom, match} <- @operators do %>
-    def tag(<%= match %>), do: {:operator, <%= inspect(atom) %>}
+    def tag(<%= match %>), do: <%= inspect(atom) %>
     <% end %>
     def tag(_), do: nil
   end

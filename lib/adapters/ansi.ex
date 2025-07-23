@@ -23,19 +23,22 @@ defmodule SQL.Adapters.ANSI do
   def token_to_string({:fun, _, [left, right]}, mod) do
     "#{mod.token_to_string(left)}#{mod.token_to_string(right)}"
   end
-  def token_to_string({:ident, [{:keyword, :non_reserved},{:tag, tag}|_], [{:paren, _, _} = value]}, mod) do
+  def token_to_string({tag, [{:type, :operator}|_], [left, right]}, mod) do
+    "#{mod.token_to_string(left)} #{mod.token_to_string(tag)} #{mod.token_to_string(right)}"
+  end
+  def token_to_string({:ident, [{:type, :non_reserved},{:tag, tag}|_], [{:paren, _, _} = value]}, mod) do
     "#{mod.token_to_string(tag)}#{mod.token_to_string(value)}"
   end
-  def token_to_string({:ident, [{:keyword, :non_reserved}, {:tag, tag}|_], [{:numeric, _, _} = value]}, mod) do
+  def token_to_string({:ident, [{:type, :non_reserved}, {:tag, tag}|_], [{:numeric, _, _} = value]}, mod) do
     "#{mod.token_to_string(tag)} #{mod.token_to_string(value)}"
   end
-  def token_to_string({:ident, [{:keyword, :non_reserved}, {:tag, tag}|_], _}, mod) do
+  def token_to_string({:ident, [{:type, :non_reserved}, {:tag, tag}|_], _}, mod) do
       mod.token_to_string(tag)
   end
-  def token_to_string({tag, [{:keyword, :reserved}|_], [{:paren, _, _} = value]}, mod) when tag not in ~w[on as in select]a do
+  def token_to_string({tag, [{:type, :reserved}|_], [{:paren, _, _} = value]}, mod) when tag not in ~w[on as in select]a do
     "#{mod.token_to_string(tag)}#{mod.token_to_string(value)}"
   end
-  def token_to_string({tag, [{:keyword, :reserved}|_], []}, mod) do
+  def token_to_string({tag, [{:type, :reserved}|_], []}, mod) do
     mod.token_to_string(tag)
   end
   def token_to_string({tag, _, [left, {:all = t, _, right}]}, mod) when tag in ~w[union except intersect]a do
@@ -89,13 +92,13 @@ defmodule SQL.Adapters.ANSI do
   def token_to_string(value, _mod) when is_integer(value) do
     [value]
   end
-  def token_to_string({tag, _, [left, right]}, mod) when tag in ~w[:: [\] <> <= >= != || + - ^ * / % < > = like ilike as union except intersect between and or is not in cursor for to]a do
+  def token_to_string({tag, _, [left, right]}, mod) when tag in ~w[like ilike as union except intersect between and or is not in cursor for to]a do
     "#{mod.token_to_string(left)} #{mod.token_to_string(tag)} #{mod.token_to_string(right)}"
   end
-  def token_to_string({tag, [{:keyword, :reserved}|_], values}, mod) do
+  def token_to_string({tag, [{:type, :reserved}|_], values}, mod) do
     "#{mod.token_to_string(tag)} #{mod.token_to_string(values)}"
   end
-  def token_to_string({tag, [{:keyword, :non_reserved}|_], values}, mod) when tag != :ident do
+  def token_to_string({tag, [{:type, :non_reserved}|_], values}, mod) when tag != :ident do
     "#{mod.token_to_string(tag)} #{mod.token_to_string(values)}"
   end
   def token_to_string({tag, _, []}, mod) do

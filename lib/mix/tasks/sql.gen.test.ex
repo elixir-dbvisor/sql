@@ -35,6 +35,7 @@ defmodule Mix.Tasks.Sql.Gen.Test do
     |> String.replace(~r{'\s+\)}, &String.replace(&1, " ", ""))
     |> String.replace(~r{\*\s+\)}, &String.replace(&1, " ", ""))
     |> String.replace(~r{\)\s+\)}, &String.replace(&1, " ", ""))
+    |> String.replace(~r{(A)\s\+\d}, &Enum.join(Regex.split(~r{\d}, &1, include_captures: true, trim: true), " "))
     |> String.replace(~r{\W(SELECT|REFERENCES|INSERT|UPDATE|IN|MYTEMP)\(}, &Enum.join(Regex.split(~r{\(}, &1, include_captures: true, trim: true), " "))
     |> String.replace(~r{^(SELECT)\(}, &Enum.join(Regex.split(~r{\(}, &1, include_captures: true, trim: true), " "))
     |> String.replace(~r{\s+\.\s+}, &String.replace(&1, " ", ""))
