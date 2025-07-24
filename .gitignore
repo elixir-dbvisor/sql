@@ -24,3 +24,5 @@ ecto_sigil-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+/test/conformance
+/standard
