@@ -72,6 +72,7 @@ defmodule Mix.Tasks.Sql.Gen.Helpers do
       {:json_path_return, [type: :postgres], ["@?"]},
       {:ranges_adjacent, [type: :postgres], ["-|-"]},
       {:cast, [type: :postgres], ["::"]},
+      {:as, [type: :postgres], ["as"]},
     ]
     rules = SQL.BNF.parse(%{
     "<reserved word>" => ~w[| LIMIT | ILIKE | BACKWARD | FORWARD | ISNULL | NOTNULL],
@@ -99,7 +100,7 @@ defmodule Mix.Tasks.Sql.Gen.Helpers do
     whitespace = Enum.map(rules.terminals["<whitespace>"], fn <<c::utf8>> -> c end)
     newline = Enum.map(rules.terminals["<newline>"], fn <<c::utf8>> -> c end)
     reserved = rules.keywords["<reserved word>"] ++ rules.keywords["<SQL/JSON key word>"]
-    create_file("lib/helpers.ex", helpers_template([mod: SQL.Lexer, reserved: Enum.uniq(reserved), non_reserved: Enum.uniq(rules.keywords["<non-reserved word>"]), nested_start: ~c"#{elem(exprs, 1)}", nested_end: ~c"#{elem(exprs, 2)}", special_characters: ~c"#{Enum.uniq(Enum.map(rules.special_characters, &elem(&1, 1)))}", operators: Enum.uniq(Enum.flat_map(rules.operators, &elem(&1, 1))), digits: ~c"#{rules.digits["<digit>"]}", exprs: exprs, space: space, whitespace: whitespace, newline: newline]))
+    create_file("lib/helpers.ex", helpers_template([mod: SQL.Lexer, reserved: Enum.uniq(reserved), non_reserved: Enum.uniq(rules.keywords["<non-reserved word>"]), nested_start: ~c"#{elem(exprs, 1)}", nested_end: ~c"#{elem(exprs, 2)}", special_characters: ~c"#{Enum.uniq(Enum.map(rules.special_characters, &elem(&1, 1)))}", operators: Enum.uniq(Enum.flat_map(rules.operators, &elem(&1, 1))), digits: ~c"#{rules.digits["<digit>"]}", exprs: exprs, space: space, whitespace: whitespace, newline: newline]), force: true)
   end
 
   embed_template(:helpers, """

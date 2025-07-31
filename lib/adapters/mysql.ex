@@ -12,4 +12,7 @@ defmodule SQL.Adapters.MySQL do
   @doc false
   def token_to_string(value, mod \\ __MODULE__)
   def token_to_string(token, mod), do: SQL.Adapters.ANSI.token_to_string(token, mod)
+
+  @doc false
+  def to_iodata(token, context, indent), do: SQL.Adapters.ANSI.to_iodata(token, context, indent)
 end

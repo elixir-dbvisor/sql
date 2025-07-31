@@ -43,7 +43,7 @@ defmodule SQL.BNF do
         cond do
           String.ends_with?(r, "word>") == true ->
             e = if is_map_key(opts, r), do: e ++ opts[r], else: e
-            {[{r, (for v <- e, v != "|", do: {atom(v), match(v), guard(v)})} | keywords], operators, letters, digits, terminals}
+            {[{r, (for v <- e, v not in ["|", "AS"], do: {atom(v), match(v), guard(v)})} | keywords], operators, letters, digits, terminals}
           String.ends_with?(r, "letter>") == true -> {keywords, operators, [{r, Enum.reject(e, &(&1 == "|"))}|letters], digits, terminals}
           String.ends_with?(r, "digit>") == true -> {keywords, operators, letters, [{r, Enum.reject(e, &(&1 == "|"))}|digits], terminals}
           String.ends_with?(r, "operator>") == true -> {keywords, [rule | operators], letters, digits, terminals}

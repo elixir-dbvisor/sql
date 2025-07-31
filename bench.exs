@@ -11,7 +11,7 @@ sql = ~SQL[with recursive temp (n, fact) as (select 0, 1 union all select n+1, (
 query = "temp" |> recursive_ctes(true) |> with_cte("temp", as: ^union_all(select("temp", [t], %{n: 0, fact: 1}), ^where(select("temp", [t], [t.n+1, t.n+1*t.fact]), [t], t.n < 9))) |> select([t], [t.n])
 result = Tuple.to_list(SQL.Lexer.lex("with recursive temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)"))
 tokens = Enum.at(result, -1)
-context = Enum.at(result, 1)
+context = Map.put(Enum.at(result, 1), :sql_lock, nil)
 Benchee.run(
   %{
   "comptime to_string" => fn _ -> to_string(sql) end,

@@ -9,5 +9,5 @@ defmodule SQL.MixFormatter do
   def features(opts), do: [sigils: [:SQL], extensions: get_in(opts, [:sql, :extensions])]
 
   @impl Mix.Tasks.Format
-  def format(source, _opts), do: "#{SQL.parse(source)}"
+  def format(source, _opts), do: SQL.parse(source)
 end

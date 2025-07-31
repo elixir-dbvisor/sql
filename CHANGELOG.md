@@ -8,13 +8,19 @@
 ## v0.3.0 (2025-08-01)
 
 ### Enhancement
- - Improve SQL generation with 57-344x compared to Ecto [#12](https://github.com/elixir-dbvisor/sql/pull/12).
+ - Improve SQL generation with over 100x compared to Ecto [#12](https://github.com/elixir-dbvisor/sql/pull/12), [#19](https://github.com/elixir-dbvisor/sql/pull/19).
  - Fix bug for complex CTE [#15](https://github.com/elixir-dbvisor/sql/pull/15). Thanks to @kafaichoi
  - Support for PostgresSQL GiST operators [#18](https://github.com/elixir-dbvisor/sql/pull/18). Thanks to @ibarchenkov
  - `float` and `integer` nodes have now become `numeric` with metadata to distinguish `sign`, `whole` and `fractional` [#19](https://github.com/elixir-dbvisor/sql/pull/19).
  - `keyword` nodes are now `ident` with metadata distinguish if it's a `keyword` [#19](https://github.com/elixir-dbvisor/sql/pull/19).
  - `SQL.Lexer.lex/4` now returns `{:ok, context, tokens}` [#19](https://github.com/elixir-dbvisor/sql/pull/19).
  - `SQL.Parser.parse/1` has become `SQL.Parser.parse/2` and takes `tokens` and `context` from `SQL.Lexer.lex/4` and returns `{:ok, context, tokens}` or raises an error [#19](https://github.com/elixir-dbvisor/sql/pull/19).
+ - Support for compile time warnings on missing relations in a query. [#22](https://github.com/elixir-dbvisor/sql/pull/22)
+ - `mix sql.get` creates a lock file which are used to generate warnings at compile time. [#22](https://github.com/elixir-dbvisor/sql/pull/22)
+ - Support SQL formatting. [#22](https://github.com/elixir-dbvisor/sql/pull/22)
+
+### Deprecation
+ - token_to_string/2 is deprecated in favor of to_iodata/3 [#22](https://github.com/elixir-dbvisor/sql/pull/22).
 
 
 ## v0.2.0 (2025-05-04)
