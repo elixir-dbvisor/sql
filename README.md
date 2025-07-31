@@ -20,18 +20,30 @@ iex(1)> email = "john@example.com"
 "john@example.com"
 iex(2)> ~SQL[from users] |> ~SQL[where email = {{email}}] |> ~SQL"select id, email"
 ~SQL"""
-where email = {{email}} from users select id, email
+select
+  id,
+  email
+from
+  users
+where
+  email = {{email}}
 """
 iex(3)> sql = ~SQL[from users where email = {{email}} select id, email]
 ~SQL"""
-from users where email = {{email}} select id, email
+select
+  id,
+  email
+from
+  users
+where
+  email = {{email}}
 """
 iex(4)> to_sql(sql)
 {"select id, email from users where email = ?", ["john@example.com"]}
 iex(5)> to_string(sql)
 "select id, email from users where email = ?"
 iex(6)> inspect(sql)
-"~SQL\"\"\"\nfrom users where email = {{email}} select id, email\n\"\"\""
+"~SQL\"\"\"\nselect\n  id, \n  email\nfrom\n  users\nwhere\n  email = {{email}}\n\"\"\""
 ```
 
 ### Leverage the Enumerable protocol in your repository

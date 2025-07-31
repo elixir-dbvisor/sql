@@ -9,7 +9,7 @@ defmodule SQL.Lexer do
   def lex(binary, file \\ "nofile", params \\ 0, binding \\ [], aliases \\ []) do
     case lex(binary, file, params, binding, aliases, 0, 0, nil, [], nil, [], 0) do
       {:error, error} -> raise TokenMissingError, [{:snippet, binary} | error]
-      {"", ^file, params, binding, aliases, _line, _column, nil, [], nil, acc, 0} -> {:ok, %{params: params, binding: binding, aliases: aliases}, acc}
+      {"", ^file, params, binding, aliases, _line, _column, nil, [], nil, acc, 0} -> {:ok, %{params: params, binding: binding, aliases: aliases, errors: []}, acc}
     end
   end
   def lex("", file, _params, _binding, _aliases, line, column, type, _data, _meta, _acc, _n) when type in ~w[backtick quote double_quote double_braces]a do
@@ -82,7 +82,8 @@ defmodule SQL.Lexer do
         case node(type, line, column, data, meta, file) do
           {:ident, _, _} = node ->
             update_state(rest, f, p, b, a, line, column, :fun, [node, node(tag, l, c, value, nil, f)], nil, acc, n, l, c, nil, [], nil)
-
+          {_, [{:type, :operator}|_], _} = node ->
+            lex(rest, f, params, binding, aliases, l, c, nil, [], nil, [node(tag, l, c, value, nil, f), node|acc], n)
           {t, m, []=a2} ->
             lex(rest, f, params, binding, aliases, l, c, nil, [], nil, [{t, m, [node(tag, l, c, value, nil, f)|a2]}|acc], n)
         end
@@ -189,9 +190,6 @@ defmodule SQL.Lexer do
   def update_state(rest, file, params, binding, aliases, line, column, type, data, meta, [{:dot=t2, m2, []=a}, {tag, _, _}=right|acc], n, l, c, t, d, m) when (type in ~w[ident double_quote bracket dot]a or data==[[], ?*]) and tag in ~w[ident double_quote bracket dot]a do
     lex(rest, file, params, binding, aliases, l, c, t, d, m, [{t2, m2, [right, node(type, line, column, data, meta, file)|a]}|acc], n)
   end
-  def update_state(rest, file, params, [format: true]=binding, aliases, line, column, :double_braces=type, data, meta, acc, n, l, c, t, d, m) do
-    lex(rest, file, params, binding, aliases, l, c, t, d, m, [node(type, line, column, data, meta, file)|acc], n)
-  end
   def update_state(rest, file, params, binding, aliases, line, column, :double_braces=type, data, meta, acc, n, l, c, t, d, m) do
     params=params+1
     lex(rest, file, params, :lists.flatten(binding, [Code.string_to_quoted!(IO.iodata_to_binary(data), file: file, line: line, column: column, columns: true, token_metadata: true, existing_atoms_only: true)]), aliases, l, c,  t, d, m, [node(type, line, column, [params], meta, file)|acc], n)
@@ -220,9 +218,10 @@ defmodule SQL.Lexer do
   def node(tag, line, column, [{_, _, _} | _]=data, _meta, file), do: {tag, [type: :expression, line: line, column: column, file: file], data}
   def node(tag, line, column, data, nil, file) do
     case tag(data) do
+      nil -> {tag, [type: :literal, line: line, column: column, file: file], data}
       {:reserved = k, tag} -> {tag, [type: k, line: line, column: column, file: file], []}
       {k, t} -> {tag, [type: k, tag: t, line: line, column: column, file: file], data}
-      _ -> {tag, [type: :literal, line: line, column: column, file: file], data}
+      tag -> {tag, [type: :operator, line: line, column: column, file: file], []}
     end
   end
   def node(tag, line, column, data, _meta, file), do: {tag, [type: :literal, line: line, column: column, file: file], data}

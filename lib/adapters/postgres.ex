@@ -18,4 +18,25 @@ defmodule SQL.Adapters.Postgres do
       "#{mod.token_to_string(left)} #{mod.token_to_string(tag)} #{mod.token_to_string(right)}"
   end
   def token_to_string(token, mod), do: SQL.Adapters.ANSI.token_to_string(token, mod)
+
+  @doc false
+  def to_iodata({:not, _, [left, {:in, _, [{:binding, _, [idx]}]}]}, %{format: true, binding: binding} = context, indent) do
+    [context.module.to_iodata(left, context, indent), ?\s, ?{,?{,Macro.to_string(Enum.at(binding, idx-1)),?},?}]
+  end
+  def to_iodata({:not, _, [left, {:in, _, [{:binding, _, _} = right]}]}, context, indent) do
+    [context.module.to_iodata(left, context, indent), ?!, ?=, ?A,?N,?Y,?(, context.module.to_iodata(right, context, indent), ?)]
+  end
+  def to_iodata({:in, _, [left, {:binding, _, [idx]}]}, %{format: true, binding: binding} = context, indent) do
+    [context.module.to_iodata(left, context, indent), ?\s, ?{,?{,Macro.to_string(Enum.at(binding, idx-1)),?},?}]
+  end
+  def to_iodata({:in, _, [left, {:binding, _, _} = right]}, context, indent) do
+    [context.module.to_iodata(left, context, indent), ?=, ?A,?N,?Y,?(, context.module.to_iodata(right, context, indent), ?)]
+  end
+  def to_iodata({:binding, _, [idx]}, %{format: true, binding: binding}, _indent) do
+    [?{,?{,Macro.to_string(Enum.at(binding, idx-1))|[?},?}]]
+  end
+  def to_iodata({:binding, _, [idx]}, _context, _indent) do
+    ~c"$#{idx}"
+  end
+  def to_iodata(token, context, indent), do: SQL.Adapters.ANSI.to_iodata(token, context, indent)
 end

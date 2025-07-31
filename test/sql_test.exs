@@ -3,6 +3,8 @@
 
 defmodule SQLTest do
   use ExUnit.Case, async: true
+  import ExUnit.CaptureIO
+  import SQLTest.Helpers
   import SQL
 
   def from(var \\ "users") do
@@ -33,7 +35,7 @@ defmodule SQLTest do
   end
 
   test "inspect/1" do
-    assert ~s(~SQL"""\nselect +1000\n""") == inspect(~SQL[select +1000])
+    assert ~s(~SQL"""\nselect\n  +1000\n""") == inspect(~SQL[select +1000])
   end
 
   test "to_sql/1" do
@@ -100,6 +102,10 @@ defmodule SQLTest do
       assert_raise TokenMissingError, ~r"token missing on", fn ->
         SQL.parse("select id from users join orgs on 'id")
       end
+    end
+
+    test "missing relation" do
+      assert capture_io(:stderr, fn -> SQL.parse("select id from users", set_sql_lock()) end) =~ "is mentioned 1 times but does not exist"
     end
   end
 
