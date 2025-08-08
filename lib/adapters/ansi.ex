@@ -20,22 +20,31 @@ defmodule SQL.Adapters.ANSI do
   def token_to_string({tag, _, [left]}, mod) when tag in ~w[asc desc isnull notnull]a do
     "#{mod.token_to_string(left)} #{mod.token_to_string(tag)}"
   end
-  def token_to_string({:fun, _, [left, right]}, mod) do
+  def token_to_string({:not=tag, _, [{t,_,_} =left]}, mod) when t == :ident do
+    "#{mod.token_to_string(left)} #{mod.token_to_string(tag)}"
+  end
+  def token_to_string({:fn, _, [left, right]}, mod) do
     "#{mod.token_to_string(left)}#{mod.token_to_string(right)}"
+  end
+  def token_to_string({:dot, _, [left, right]}, mod) do
+    "#{mod.token_to_string(left)}.#{mod.token_to_string(right)}"
+  end
+  def token_to_string({tag, [{:type, :operator}|_], [{:not=t, _, left}, right]}, mod) do
+    "#{mod.token_to_string(left)} #{mod.token_to_string(t)} #{mod.token_to_string(tag)} #{mod.token_to_string(right)}"
   end
   def token_to_string({tag, [{:type, :operator}|_], [left, right]}, mod) do
     "#{mod.token_to_string(left)} #{mod.token_to_string(tag)} #{mod.token_to_string(right)}"
   end
-  def token_to_string({:ident, [{:type, :non_reserved},{:tag, tag}|_], [{:paren, _, _} = value]}, mod) do
+  def token_to_string({:ident, [{:tag, tag}|_], [{:paren, _, _} = value]}, mod) do
     "#{mod.token_to_string(tag)}#{mod.token_to_string(value)}"
   end
-  def token_to_string({:ident, [{:type, :non_reserved}, {:tag, tag}|_], [{:numeric, _, _} = value]}, mod) do
+  def token_to_string({:ident, [{:tag, tag}|_], [{:numeric, _, _} = value]}, mod) do
     "#{mod.token_to_string(tag)} #{mod.token_to_string(value)}"
   end
-  def token_to_string({:ident, [{:type, :non_reserved}, {:tag, tag}|_], _}, mod) do
+  def token_to_string({:ident, [{:tag, tag}|_], _}, mod) do
       mod.token_to_string(tag)
   end
-  def token_to_string({tag, [{:type, :reserved}|_], [{:paren, _, _} = value]}, mod) when tag not in ~w[on as in select]a do
+  def token_to_string({tag, [{:type, :reserved}|_], [{:paren, _, _} = value]}, mod) when tag not in ~w[on in select]a do
     "#{mod.token_to_string(tag)}#{mod.token_to_string(value)}"
   end
   def token_to_string({tag, [{:type, :reserved}|_], []}, mod) do
@@ -59,11 +68,23 @@ defmodule SQL.Adapters.ANSI do
   def token_to_string({:comments, _, value}, _mod) do
     "\\*#{value}*\\"
   end
+  def token_to_string({:double_quote, [{:prefix, prefix}|_], value}, _mod) do
+    "#{prefix}\"#{value}\""
+  end
   def token_to_string({:double_quote, _, value}, _mod) do
     "\"#{value}\""
   end
+  def token_to_string({:quote, [{:prefix, prefix}|_], value}, _mod) do
+    "#{prefix}'#{value}'"
+  end
   def token_to_string({:quote, _, value}, _mod) do
     "'#{value}'"
+  end
+  def token_to_string({:backtick, [{:prefix, prefix}|_], value}, _mod) do
+    "#{prefix}`#{value}`"
+  end
+  def token_to_string({:backtick, _, value}, _mod) do
+    "`#{value}`"
   end
   def token_to_string({:paren, _, value}, mod) do
     "(#{mod.token_to_string(value)})"
@@ -77,9 +98,6 @@ defmodule SQL.Adapters.ANSI do
   def token_to_string({:comma, _, value}, mod) do
     "#{mod.token_to_string(value)},"
   end
-  def token_to_string({:dot, _, [left, right]}, mod) do
-    "#{mod.token_to_string(left)}.#{mod.token_to_string(right)}"
-  end
   def token_to_string({tag, _, value}, _mod) when tag in ~w[ident numeric]a do
     "#{value}"
   end
@@ -92,17 +110,17 @@ defmodule SQL.Adapters.ANSI do
   def token_to_string(value, _mod) when is_integer(value) do
     [value]
   end
-  def token_to_string({tag, _, [left, right]}, mod) when tag in ~w[like ilike as union except intersect between and or is not in cursor for to]a do
+  def token_to_string({tag, _, [left, right]}, mod) when tag in ~w[like ilike union except intersect between and or is not in cursor for to]a do
     "#{mod.token_to_string(left)} #{mod.token_to_string(tag)} #{mod.token_to_string(right)}"
-  end
-  def token_to_string({tag, [{:type, :reserved}|_], values}, mod) do
-    "#{mod.token_to_string(tag)} #{mod.token_to_string(values)}"
-  end
-  def token_to_string({tag, [{:type, :non_reserved}|_], values}, mod) when tag != :ident do
-    "#{mod.token_to_string(tag)} #{mod.token_to_string(values)}"
   end
   def token_to_string({tag, _, []}, mod) do
     mod.token_to_string(tag)
+  end
+  def token_to_string({tag, [{:type, :reserved}|_], values=[_|_]}, mod) do
+    "#{mod.token_to_string(tag)} #{mod.token_to_string(values)}"
+  end
+  def token_to_string({tag, [{:type, :non_reserved}|_], values=[_|_]}, mod) when tag != :ident do
+    "#{mod.token_to_string(tag)} #{mod.token_to_string(values)}"
   end
   def token_to_string(values, mod) do
     values
@@ -136,8 +154,14 @@ defmodule SQL.Adapters.ANSI do
   def to_iodata({tag, _, [left]}, context, indent) when tag in ~w[asc desc isnull notnull]a do
     [context.module.to_iodata(left, context, indent),?\s|context.module.to_iodata(tag, context, indent)]
   end
-  def to_iodata({:fun, _, [left, right]}, context, indent) do
+  def to_iodata({:fn, _, [left, right]}, context, indent) do
     [context.module.to_iodata(left, context, indent)|context.module.to_iodata(right, context, indent)]
+  end
+  def to_iodata({:dot, _, [left, right]}, context, indent) do
+    [context.module.to_iodata(left, context, indent),?\.|context.module.to_iodata(right, context, indent)]
+  end
+  def to_iodata({tag, [{:type, :operator}|_], [{:not=t, _, left}, right]}, context, indent) do
+    [context.module.to_iodata(left, context, indent),?\s,context.module.to_iodata(t, context, indent),?\s,context.module.to_iodata(tag, context, indent),?\s|context.module.to_iodata(right, context, indent)]
   end
   def to_iodata({tag, [{:type, :operator}|_], [left, {:paren, _, _} = right]}, context, indent) do
     [context.module.to_iodata(left, context, indent),?\s,context.module.to_iodata(tag, context, indent),?\s|context.module.to_iodata(right, context, indent)]
@@ -145,13 +169,16 @@ defmodule SQL.Adapters.ANSI do
   def to_iodata({tag, [{:type, :operator}|_], [left, right]}, context, indent) do
     [context.module.to_iodata(left, context, indent),?\s,context.module.to_iodata(tag, context, indent),?\s|context.module.to_iodata(right, context, indent)]
   end
-  def to_iodata({:ident, [{:type, :non_reserved},{:tag, tag}|_], [{:paren, _, _} = value]}, context, indent) do
+  def to_iodata({tag, [{:type, :operator}|_], []}, context, indent) do
+    [context.module.to_iodata(tag, context, indent)]
+  end
+  def to_iodata({:ident, [{:tag, tag}|_], [{:paren, _, _} = value]}, context, indent) do
     [context.module.to_iodata(tag, context, indent)|context.module.to_iodata(value, context, indent)]
   end
-  def to_iodata({:ident, [{:type, :non_reserved}, {:tag, tag}|_], [{:numeric, _, _} = value]}, context, indent) do
+  def to_iodata({:ident, [{:tag, tag}|_], [{:numeric, _, _} = value]}, context, indent) do
     [context.module.to_iodata(tag, context, indent),?\s|context.module.to_iodata(value, context, indent)]
   end
-  def to_iodata({:ident, [{:type, :non_reserved}, {:tag, tag}|_], _}, context, indent) do
+  def to_iodata({:ident, [{:tag, tag}|_], _}, context, indent) do
     context.module.to_iodata(tag, context, indent)
   end
   def to_iodata({tag, [{:type, :reserved}|_], [{:paren, _, _} = value]}, context, indent) when tag not in ~w[on in select]a do
@@ -178,14 +205,29 @@ defmodule SQL.Adapters.ANSI do
   def to_iodata({:comments, _, value}, _context, _indent) do
     [?\\,?*,value|[?*, ?\\]]
   end
+  def to_iodata({:double_quote, [{:prefix, prefix}|_], value}=node, context, _indent) do
+    case node in context.errors do
+      true -> [[prefix,?",:red,value|[:reset, ?"]]]
+      false -> [prefix, ?", value, ?"]
+    end
+  end
   def to_iodata({:double_quote, _, value}=node, context, _indent) do
     case node in context.errors do
       true -> [[?",:red,value|[:reset, ?"]]]
-      false -> value
+      false -> [?", value, ?"]
     end
+  end
+  def to_iodata({:quote, [{:prefix, prefix}|_], value}, _context, _indent) do
+    [prefix,?',value|[?']]
   end
   def to_iodata({:quote, _, value}, _context, _indent) do
     [?',value|[?']]
+  end
+  def to_iodata({:backtick, [{:prefix, prefix}|_], value}, _context, _indent) do
+    [prefix,?`,value|[?`]]
+  end
+  def to_iodata({:backtick, _, value}, _context, _indent) do
+    [?`,value|[?`]]
   end
   def to_iodata({:paren, _, [{_,[{:type, :reserved}|_],_}|_] = value}, context, indent) do
     [?(,?\n, context.module.to_iodata(value, context, indent+1)|?)]
@@ -201,9 +243,6 @@ defmodule SQL.Adapters.ANSI do
   end
   def to_iodata({:comma, _, value}, context, indent) do
     [context.module.to_iodata(value, context, indent), ?,, ?\s]
-  end
-  def to_iodata({:dot, _, [left, right]}, context, indent) do
-    [context.module.to_iodata(left, context, indent),?\.|context.module.to_iodata(right, context, indent)]
   end
   def to_iodata({tag, _, value} = node, context, _indent) when tag in ~w[ident numeric]a do
     case node in context.errors do
@@ -226,10 +265,10 @@ defmodule SQL.Adapters.ANSI do
   def to_iodata({tag, _, [left, right]}, context, indent) when tag in ~w[like ilike union except intersect between and or is not in cursor for to]a do
     [context.module.to_iodata(left, context, indent),?\s,context.module.to_iodata(tag, context, indent),?\s|context.module.to_iodata(right, context, indent)]
   end
-  def to_iodata({tag, [{:type, :reserved}|_], values}, context, indent) do
+  def to_iodata({tag, [{:type, :reserved}|_], values=[_|_]}, context, indent) do
     [context.module.to_iodata(tag, context, indent),?\s|context.module.to_iodata(values, context, indent)]
   end
-  def to_iodata({tag, [{:type, :non_reserved}|_], values}, context, indent) when tag != :ident do
+  def to_iodata({tag, [{:type, :non_reserved}|_], values=[_|_]}, context, indent) when tag != :ident do
     [context.module.to_iodata(tag, context, indent),?\s|context.module.to_iodata(values, context, indent)]
   end
   def to_iodata({tag, _, []}, context, indent) do

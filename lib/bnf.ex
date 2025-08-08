@@ -43,7 +43,7 @@ defmodule SQL.BNF do
         cond do
           String.ends_with?(r, "word>") == true ->
             e = if is_map_key(opts, r), do: e ++ opts[r], else: e
-            {[{r, (for v <- e, v not in ["|", "AS"], do: {atom(v), match(v), guard(v)})} | keywords], operators, letters, digits, terminals}
+            {[{r, (for v <- e, v not in ["|", "AS"], do: {atom(v), qouted_match(v), qouted_guard(v)})} | keywords], operators, letters, digits, terminals}
           String.ends_with?(r, "letter>") == true -> {keywords, operators, [{r, Enum.reject(e, &(&1 == "|"))}|letters], digits, terminals}
           String.ends_with?(r, "digit>") == true -> {keywords, operators, letters, [{r, Enum.reject(e, &(&1 == "|"))}|digits], terminals}
           String.ends_with?(r, "operator>") == true -> {keywords, [rule | operators], letters, digits, terminals}
@@ -61,8 +61,8 @@ defmodule SQL.BNF do
       {_, _, [b |_]} ->  byte_size(b)
     end, :desc)
     |> Enum.map(fn
-      {r, e} -> {r, (for v <- e, do: {String.to_atom(v), inline_match(v)})}
-      {r, _, e} -> {r, (for v <- e, do: {String.to_atom(v), inline_match(v)})}
+      {r, e} -> {r, (for v <- e, do: {String.to_atom(v), qouted_inline_match(v)})}
+      {r, _, e} -> {r, (for v <- e, do: {String.to_atom(v), qouted_inline_match(v)})}
     end)
     special_characters = Enum.filter(non_terminals ++ root, &(String.ends_with?(elem(&1, 0), "special character>") || String.ends_with?(elem(&1, 0), "special symbol>")))
     special_characters = for {_, e} <- special_characters, v <- e, v != "|", do: {String.to_atom(v), elem(Enum.find(symbols, {v, v}, &elem(&1, 0) == v), 1)}
@@ -196,23 +196,48 @@ defmodule SQL.BNF do
 
   def cast(<<?<, b, _::binary>> = expr) when b in ?a..?z or b in ?A..?Z, do: expr
   def cast(expr) when expr in ["|", "{", "}", "[", "]", :ignore, :self, "\u0020", "\u0009", "\u000D", "\u00A0", "\u00A0", "\u1680", "\u2000", "\u2001", "\u2002", "\u2003", "\u2004", "\u2005", "\u2006", "\u2007", "\u2008", "\u2009", "\u200A", "\u202F", "\u205F", "\u3000", "\u180E", "\u200B", "\u200C", "\u200D", "\u2060", "\uFEFF", "\u000A", "\u000B", "\u000C", "\u000D", "\u0085", "\u2028", "\u2029"], do: expr
-  def cast(expr) when is_binary(expr), do: {atom(expr), match(expr), guard(expr)}
+  def cast(expr) when is_binary(expr), do: {atom(expr), qouted_match(expr), qouted_guard(expr)}
   def cast(expr) when is_tuple(expr) or is_list(expr) or is_atom(expr), do: expr
 
   def atom(value), do: String.to_atom(String.replace(String.replace(String.downcase(value), ["<", ">"], ""), ["/", " "], "_"))
-  def match(value), do: Enum.reduce(1..byte_size(value), "[]", fn n, acc -> "[#{acc}, b#{n}]" end)
-  def inline_match(value) do
-    for <<k <- value>>, reduce: "[]" do
-      acc -> "[#{acc}, ?#{<<k>>}]"
+  # def match(value), do: Enum.reduce(1..byte_size(value), "[]", fn n, acc -> "[#{acc}, b#{n}]" end)
+  # def inline_match(value) do
+  #   for <<k <- value>>, reduce: "[]" do
+  #     acc -> "[#{acc}, ?#{<<k>>}]"
+  #   end
+  # end
+
+  # def guard(value) do
+  #   {value, _n} = for <<k <- String.downcase(value)>>, reduce: {"", 1} do
+  #     {"", n} -> {guard(k, n), n+1}
+  #     {acc, n} -> {"#{acc} and #{guard(k, n)}", n+1}
+  #   end
+  #   value
+  # end
+  # def guard(k, n), do: "b#{n} in #{inspect(Enum.uniq(~c"#{<<k>>}#{String.upcase(<<k>>)}"))}"
+
+  @doc false
+  def qouted_match(value), do: Enum.reduce(1..byte_size(value), [], fn n, acc -> [acc | [{:"b#{n}", [], Elixir}]] end)
+
+  @doc false
+  def qouted_inline_match(value) do
+    for <<k <- value>>, reduce: [] do
+      acc -> [acc, k]
     end
   end
-  def guard(value) do
-    {value, _n} = for <<k <- String.downcase(value)>>, reduce: {"", 1} do
-      {"", n} -> {guard(k, n), n+1}
-      {acc, n} -> {"#{acc} and #{guard(k, n)}", n+1}
+
+  @doc false
+  def qouted_guard(value, acc \\ []) do
+    {value, _n} = for <<k <- String.downcase(value)>>, reduce: {acc, 1} do
+      {[], n}  -> {__guard__(k, n), n+1}
+      {acc, n} -> {{:and, [context: Elixir, imports: [{2, Kernel}]], [acc,__guard__(k, n)]}, n+1}
     end
     value
   end
-  def guard(k, n) when k in ?a..?z, do: "is_#{<<k>>}(b#{n})"
-  def guard(k, n), do: "b#{n} in #{inspect(Enum.uniq(~c"#{<<k>>}#{String.upcase(<<k>>)}"))}"
+
+  @doc false
+  def __guard__(k, n) do
+    {:in, [context: Elixir, imports: [{2, Kernel}]],[{:"b#{n}", [], Elixir},{:sigil_c, [delimiter: "\"", context: Elixir, imports: [{2, Kernel}]],[{:<<>>, [], ["#{<<k>>}#{String.upcase(<<k>>)}"]}, []]}]}
+  end
+
 end

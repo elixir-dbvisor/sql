@@ -31,7 +31,7 @@ defmodule SQL.ParserTest do
 
     test "missing table with sql.lock and without tables in it" do
       {:ok, context, tokens} = SQL.Lexer.lex(@query)
-      context = Map.put(context, :sql_lock, %{tables: []})
+      context = Map.put(context, :sql_lock, %{tables: [], columns: []})
       {:ok, %{errors: []}, _tokens} = SQL.Parser.parse(tokens, context)
     end
 

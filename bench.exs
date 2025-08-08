@@ -11,7 +11,8 @@ sql = ~SQL[with recursive temp (n, fact) as (select 0, 1 union all select n+1, (
 query = "temp" |> recursive_ctes(true) |> with_cte("temp", as: ^union_all(select("temp", [t], %{n: 0, fact: 1}), ^where(select("temp", [t], [t.n+1, t.n+1*t.fact]), [t], t.n < 9))) |> select([t], [t.n])
 result = Tuple.to_list(SQL.Lexer.lex("with recursive temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)"))
 tokens = Enum.at(result, -1)
-context = Map.put(Enum.at(result, 1), :sql_lock, nil)
+context = Map.merge(Enum.at(result, 1), %{sql_lock: nil, module: SQL.Adapters.ANSI})
+{:ok, pcontext, ptokens} = SQL.Parser.parse(tokens, context)
 Benchee.run(
   %{
   "comptime to_string" => fn _ -> to_string(sql) end,
@@ -20,6 +21,9 @@ Benchee.run(
   "comptime ecto" => fn _ -> SQL.Repo.to_sql(:all, query) end,
   "lex" => fn _ -> SQL.Lexer.lex("with recursive temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)") end,
   "parse" => fn _ -> SQL.Parser.parse(tokens, context) end,
+  "iodata" => fn _ -> pcontext.module.to_iodata(ptokens, pcontext, 0, [])  end,
+  "token_to_string" => fn _ -> pcontext.module.token_to_string(ptokens)  end,
+  "runtime dynamic" => fn _ -> ~SQL[from users] |> ~SQL[select *] |> ~SQL[where id = {{1+2*3}}] end,
   "runtime to_string" => fn _ -> to_string(~SQL[with recursive temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)]) end,
   "runtime to_sql" => fn _ -> SQL.to_sql(~SQL[with recursive temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)]) end,
   "runtime inspect" => fn _ -> inspect(~SQL[with recursive temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)]) end,
@@ -27,5 +31,8 @@ Benchee.run(
   },
   inputs: %{"1..100_000" => Enum.to_list(1..100_000)},
   memory_time: 2,
-  reduction_time: 2
+  reduction_time: 2,
+  unit_scaling: :smallest,
+  measure_function_call_overhead: true,
+  profile_after: :eprof
 )

@@ -181,6 +181,7 @@ defmodule SQL.Adapters.MySQLTest do
       assert "select \"db.users.id\"" == to_string(~SQL[select "db.users.id"])
       assert "select 'db.users'" == to_string(~SQL[select 'db.users'])
       assert "select \"db.users.id\", 'db.users'" == to_string(~SQL[select "db.users.id", 'db.users'])
+      assert "select X'616263'" == to_string(~SQL[select X'616263'])
     end
   end
 

@@ -22,6 +22,7 @@ defmodule SQL.Token do
 
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
+      @compile {:inline, to_iodata: 3, to_iodata: 4}
       @doc false
       @behaviour SQL.Token
       def token_to_string(token), do: SQL.Adapters.ANSI.token_to_string(token, __MODULE__)

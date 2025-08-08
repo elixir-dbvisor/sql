@@ -88,9 +88,9 @@ defmodule SQL do
       {:static, data} ->
         id = id(data)
         {:ok, context, tokens} = SQL.Lexer.lex(data, env.file)
-        {:ok, context, t} = SQL.Parser.parse(tokens, Map.merge(context, %{sql_lock: sql_lock, module: module}))
-        {string, inspect} = format(t, context, stack)
-        sql = %{sql | tokens: t, string: string, inspect: inspect, id: id}
+        {:ok, context, tokens} = SQL.Parser.parse(tokens, Map.merge(context, %{sql_lock: sql_lock, module: module}))
+        {string, inspect} = format(tokens, context, stack)
+        sql = %{sql | tokens: tokens, string: string, inspect: inspect, id: id}
         case context.binding do
           []     -> Macro.escape(sql)
           params ->

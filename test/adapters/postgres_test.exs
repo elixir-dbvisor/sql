@@ -169,6 +169,17 @@ defmodule SQL.Adapters.PostgresTest do
       assert "select +1000" == to_string(~SQL[select +1000])
       assert "select +10.00" == to_string(~SQL[select +10.00])
       assert "select -10.00" == to_string(~SQL[select -10.00])
+      assert "select 0b100101" == to_string(~SQL[select 0b100101])
+      assert "select 0B10011001" == to_string(~SQL[select 0B10011001])
+      assert "select 0o273" == to_string(~SQL[select 0o273])
+      assert "select 0O755" == to_string(~SQL[select 0O755])
+      assert "select 0x42f" == to_string(~SQL[select 0x42f])
+      assert "select 0XFFFF" == to_string(~SQL[select 0XFFFF])
+      assert "select 1_500_000_000" == to_string(~SQL[select 1_500_000_000])
+      assert "select 0b10001000_00000000" == to_string(~SQL[select 0b10001000_00000000])
+      assert "select 0o_1_755" == to_string(~SQL[select 0o_1_755])
+      assert "select 0xFFFF_FFFF" == to_string(~SQL[select 0xFFFF_FFFF])
+      assert "select 1.618_034" == to_string(~SQL[select 1.618_034])
     end
 
     test "identifier" do
@@ -182,6 +193,20 @@ defmodule SQL.Adapters.PostgresTest do
       assert "select \"db.users.id\"" == to_string(~SQL[select "db.users.id"])
       assert "select 'db.users'" == to_string(~SQL[select 'db.users'])
       assert "select \"db.users.id\", 'db.users'" == to_string(~SQL[select "db.users.id", 'db.users'])
+
+      assert "select U&\"d\\0061t\\+000061\"" == to_string(~SQL[select U&"d\0061t\+000061"])
+      assert "select U&\"\\0441\\043B\\043E\\043D\"" == to_string(~SQL[select U&"\0441\043B\043E\043D"])
+      assert "select U&\"d!0061t!+000061\" uescape '!'" == to_string(~SQL[select U&"d!0061t!+000061" UESCAPE '!'])
+
+      assert "select U&'d\\0061t\\+000061'" == to_string(~SQL[select U&'d\0061t\+000061'])
+      assert "select U&'\\0441\\043B\\043E\\043D'" == to_string(~SQL[select U&'\0441\043B\043E\043D'])
+      assert "select U&'d!0061t!+000061' uescape '!'" == to_string(~SQL[select U&'d!0061t!+000061' UESCAPE '!'])
+    end
+
+    test "dollar qouted" do
+      # assert "select \"db.users.id\", 'db.users'" == to_string(~SQL[select $$Dianne's horse$$])
+      # assert "select \"db.users.id\", 'db.users'" == to_string(~SQL[select $SomeTag$Dianne's horse$SomeTag$])
+      # assert "select \"db.users.id\", 'db.users'" == to_string(~SQL[$function$ BEGIN RETURN ($1 ~ $q$[\t\r\n\v\\]$q$); END; $function$])
     end
   end
 
@@ -305,6 +330,12 @@ defmodule SQL.Adapters.PostgresTest do
     end
     test "-|-" do
       assert "where id -|- 1" == to_string(~SQL[where id -|- 1])
+    end
+    test "->" do
+      assert "where meta -> '{}'" == to_string(~SQL[where meta -> '{}'])
+    end
+    test "->>" do
+      assert "where meta ->> '{}'" == to_string(~SQL[where meta ->> '{}'])
     end
     test "between" do
       assert "where id between 1 and 2" == to_string(~SQL[where id between 1 and 2])
