@@ -98,7 +98,7 @@ defmodule SQL.Adapters.ANSI do
   def token_to_string({:comma, _, value}, mod) do
     "#{mod.token_to_string(value)},"
   end
-  def token_to_string({tag, _, value}, _mod) when tag in ~w[ident numeric]a do
+  def token_to_string({tag, _, value}, _mod) when tag in ~w[ident numeric special]a do
     "#{value}"
   end
   def token_to_string(value, _mod) when is_atom(value) do
@@ -244,7 +244,7 @@ defmodule SQL.Adapters.ANSI do
   def to_iodata({:comma, _, value}, context, indent) do
     [context.module.to_iodata(value, context, indent), ?,, ?\s]
   end
-  def to_iodata({tag, _, value} = node, context, _indent) when tag in ~w[ident numeric]a do
+  def to_iodata({tag, _, value} = node, context, _indent) when tag in ~w[ident numeric special]a do
     case node in context.errors do
       true -> [:red, value, :reset]
       false -> value

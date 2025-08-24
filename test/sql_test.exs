@@ -105,7 +105,7 @@ defmodule SQLTest do
     end
 
     test "missing relation" do
-      assert capture_io(:stderr, fn -> SQL.parse("select id from users", set_sql_lock()) end) =~ "is mentioned 1 times but does not exist"
+      assert capture_io(:stderr, fn -> SQL.parse("select id from users", set_sql_lock()) end) =~ "does not exist"
     end
   end
 

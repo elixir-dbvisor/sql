@@ -226,6 +226,9 @@ defmodule SQL do
 
   @doc false
   def format_error(errors), do: Enum.group_by(errors, &elem(&1, 2)) |> Enum.reduce([], fn
+    {k, [{:special, _, _}]}, acc -> [acc | ["the operator ", :red, k, :reset, " is invalid, did you mean any of #{Enum.join(SQL.Lexer.suggest_operator(:erlang.iolist_to_binary(k)), ", ")}", ?\n]]
+    {k, [{:special, _, _}|_]=v}, acc -> [acc | ["the operator ", :red, k, :reset, " is mentioned #{length(v)} times but is invalid, did you mean any of #{Enum.join(SQL.Lexer.suggest_operator(:erlang.iolist_to_binary(k)), ", ")}", ?\n]]
+    {k, [_]}, acc -> [acc | ["the relation ", :red, k, :reset, " does not exist", ?\n]]
     {k, v}, acc -> [acc | ["the relation ", :red, k, :reset, " is mentioned #{length(v)} times but does not exist", ?\n]]
   end)
 

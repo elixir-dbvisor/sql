@@ -130,7 +130,8 @@ defmodule SQL.Lexer do
   def lex(<<b, rest::binary>>, %{file: file}=context, line, column, acc) when b in ~c"!#$%&*+-/:<=>?@^|~" do
     case special(rest, [[]|[b]], column+1) do
       {rest, [_|_]=data, c} ->
-        lex(rest, context, line, c, [{:special, [type: :literal, line: line, column: column, end_column: c, file: file], data}|acc])
+        node = {:special, [type: :literal, line: line, column: column, end_column: c, file: file], data}
+        lex(rest, Map.update!(context, :errors, &:lists.append([[node],&1])), line, c, [node|acc])
       {rest, tag, c} ->
         lex(rest, context, line, c, [{tag, [type: :operator, line: line, column: column, end_column: c, file: file], []}|acc])
     end
@@ -246,6 +247,11 @@ defmodule SQL.Lexer do
   })
  reserved = rules.keywords["<reserved word>"] ++ rules.keywords["<SQL/JSON key word>"]
  operators = Enum.uniq(Enum.flat_map(rules.operators, &elem(&1, 1)))
+
+  suggestions = Enum.map(operators, &to_string(elem(&1, 0)))
+  def suggest_operator(value) do
+      Enum.sort(Enum.filter(unquote(suggestions), &(String.jaro_distance("#{value}", &1) > 0)), &(String.jaro_distance(value, &1) >= String.jaro_distance(value, &2)))
+  end
 
   def ident(<<?', rest::binary>>, prefix, l, c) do
     {rest, data, l, c} = quote(rest, [], l, c+1)
