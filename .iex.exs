@@ -3,6 +3,14 @@
 
 defmodule SQL.Repo do
   use Ecto.Repo, otp_app: :sql, adapter: Ecto.Adapters.Postgres
+  use SQL, adapter: SQL.Adapters.Postgres, repo: __MODULE__
+
+  def list_ids() do
+    ~SQL[select 1 as id]
+    |> SQL.map(fn row, columns, repo -> repo.load(%{id: :integer}, {columns, row}) end)
+    |> SQL.map(fn row -> row.id end)
+    |> Enum.map(fn v -> v end)
+  end
 end
 Application.put_env(:sql, :driver, Postgrex)
 Application.put_env(:sql, :username, "postgres")

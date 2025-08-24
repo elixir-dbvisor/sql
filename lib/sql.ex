@@ -23,7 +23,7 @@ defmodule SQL do
     end
   end
 
-  defstruct [tokens: [], params: [], module: nil, id: nil, string: nil, inspect: nil]
+  defstruct [tokens: [], params: [], module: nil, id: nil, string: nil, inspect: nil, fn: nil]
 
   defimpl Inspect, for: SQL do
     def inspect(sql, _opts), do: sql.inspect
@@ -62,6 +62,24 @@ defmodule SQL do
   @doc since: "0.1.0"
   defmacro sigil_SQL(left \\ [], right, modifiers) do
     SQL.build(left, right, modifiers, __CALLER__)
+  end
+
+  @doc """
+  Perform transformation on the result set.
+
+  ## Examples
+      iex(1)> SQL.map(~SQL"from users select id, email", fn row, columns -> Map.new(Enum.zip(columns, row)) end)
+      ~SQL\"\"\"
+      select
+        id,
+        email
+      from
+        users
+      \"\"\"
+  """
+  @doc since: "0.4.0"
+  defmacro map(left, right) do
+    SQL.build(left, right, __CALLER__)
   end
 
   @doc false
@@ -111,6 +129,23 @@ defmodule SQL do
           {string, inspect} = plan(tokens, Map.merge(context, %{sql_lock: sql_lock, module: module}), sql.id, stack)
           %{sql | params: :lists.flatten(p, cast_params(context.binding, binding(), env)), tokens: tokens, string: string, inspect: inspect}
         end
+    end
+  end
+
+  @doc false
+  def build(left, {tag, _, _} = right, _env) when tag in ~w[fn &]a do
+    {_type, data, acc2} = left
+    |> Macro.unpipe()
+    |> Enum.reduce({:static, [], []}, fn
+        {[], 0}, acc -> acc
+        {{_, _, []} = r, 0}, {_, l, right} -> {:dynamic, Macro.pipe(l, r, 0), right}
+        {{:sigil_SQL, _meta, [{:<<>>, _, _}, []]} = r, 0}, {type, l, right} -> {type, Macro.pipe(l, r, 0), right}
+        {{{:.,_,[{_,_,[:SQL]},:map]},_,[left]}, 0}, {type, acc, acc2} -> {type, acc, [left|acc2]}
+    end)
+    [r | rest] = Enum.reverse([right|acc2])
+    right = Enum.reduce(rest, r, fn r, {t, m, [{t2, m2, [vars, block]}]} -> {t, m, [{t2, m2, [vars, quote(do: unquote(r).(unquote(block)))]}]} end)
+    quote bind_quoted: [left: data, right: right] do
+      %{left | fn: right}
     end
   end
 
@@ -243,5 +278,27 @@ defmodule SQL do
     {:current_stacktrace, [_|t]} = Process.info(self(), :current_stacktrace)
     IO.warn(IO.ANSI.format([?\n, format_error(errors), iodata]), [stack|t])
     {IO.iodata_to_binary(module.token_to_string(tokens)), ~s[~SQL"""\n#{IO.iodata_to_binary(IO.ANSI.format(iodata, false))}"""]}
+  end
+
+  defimpl Enumerable, for: SQL do
+    def count(_enumerable) do
+      {:error, __MODULE__}
+    end
+    def member?(_enumerable, _element) do
+      {:error, __MODULE__}
+    end
+    def reduce(%SQL{} = enumerable, acc, fun) do
+      repo = enumerable.module.sql_config()[:repo]
+      %{rows: rows, columns: columns} = repo.query!(enumerable.string, enumerable.params)
+      fun = case Function.info(enumerable.fn, :arity) do
+              {:arity, 1} -> fn row, acc -> fun.(enumerable.fn.(row), acc) end
+              {:arity, 2} -> fn row, acc -> fun.(enumerable.fn.(row, columns), acc) end
+              {:arity, 3} -> fn row, acc -> fun.(enumerable.fn.(row, columns, repo), acc) end
+            end
+      Enumerable.reduce(rows, acc, fun)
+    end
+    def slice(_enumerable) do
+      {:error, __MODULE__}
+    end
   end
 end

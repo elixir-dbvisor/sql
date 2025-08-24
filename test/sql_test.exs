@@ -34,6 +34,20 @@ defmodule SQLTest do
     end
   end
 
+  test "map/2" do
+    columns = ~w[id email inserted_at updated_at]a
+    sql =
+    from()
+    |> ~SQL[select id, email, inserted_at, updated_at]
+    |> where()
+    |> SQL.map(fn row -> row end)
+    |> SQL.map(fn row -> Map.new(Enum.zip(columns, row)) end)
+    |> SQL.map(&(&1.id))
+
+    assert ["id"] == Enum.map([["id", "email", "inserted_at", "updated_at"]], fn row -> sql.fn.(row) end)
+  end
+
+
   test "inspect/1" do
     assert ~s(~SQL"""\nselect\n  +1000\n""") == inspect(~SQL[select +1000])
   end
