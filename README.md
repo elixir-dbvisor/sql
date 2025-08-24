@@ -46,35 +46,19 @@ iex(6)> inspect(sql)
 "~SQL\"\"\"\nselect\n  id, \n  email\nfrom\n  users\nwhere\n  email = {{email}}\n\"\"\""
 ```
 
-### Leverage the Enumerable protocol in your repository
-
 ```elixir
-  defmodule MyApp.Repo do
-    use Ecto.Repo, otp_app: :myapp, adapter: Ecto.Adapters.Postgres
-    use SQL, adapter: SQL.Adapters.Postgres
+  defmodule MyApp.Accounts do
+    use SQL, adapter: SQL.Adapters.Postgres, repo: MyApp.Repo
 
-    defimpl Enumerable, for: SQL do
-      def count(_enumerable) do
-        {:error, __MODULE__}
-      end
-      def member?(_enumerable, _element) do
-        {:error, __MODULE__}
-      end
-      def reduce(%SQL{} = enumerable, _acc, _fun) do
-        {sql, params} = SQL.to_sql(enumerable)
-        result = __MODULE__.query!(sql, params)
-        {:done, Enum.map(result.rows, &Map.new(Enum.zip(result.columns, &1)))}
-      end
-      def slice(_enumerable) do
-        {:error, __MODULE__}
-      end
+    def list_users() do
+      ~SQL[from users select *]
+      |> SQL.map(fn row, columns, repo -> repo.load(User, {columns, row}) end)
+      |> Enum.to_list()
     end
   end
 
-  iex(1)> Enum.map(~SQL[from users select *], &IO.inspect/1)
-  %{"id" => 1, "email" => "john@example.com"}
-  %{"id" => 2, "email" => "jane@example.com"}
-  [%{"id" => 1, "email" => "john@example.com"}, %{"id" => 2, "email" => "jane@example.com"}]
+  iex(1)> MyApp.Accounts.list_users()
+  [%User{id: 1, email: "john@example.com"}, %User{id: 2, email: "jane@example.com"}]
 ```
 
 ## Benchmark
@@ -82,17 +66,14 @@ You can find benchmark results [here](https://github.com/elixir-dbvisor/sql/benc
 
 ## Installation
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `sql` to your list of dependencies in `mix.exs`:
+The package can be installed by adding `sql` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
   [
-    {:sql, "~> 0.3.0"}
+    {:sql, "~> 0.4.0"}
   ]
 end
 ```
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/sql>.
+Documentation can be found at <https://hexdocs.pm/sql>.

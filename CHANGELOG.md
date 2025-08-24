@@ -5,6 +5,14 @@
 
 # Changelog
 
+## v0.4.0 (2025-XX-XX)
+
+### Enhancement
+ - Improved SQL lexing performance with other 50%  [91dc464](https://github.com/elixir-dbvisor/sql/commit/91dc464242d2e644b8c7210ac79bcf5f94c35ed8).
+ - Added warnings for unknown operators [5bd7ec3](https://github.com/elixir-dbvisor/sql/commit/5bd7ec391c028a592dc4c94ead7a8002113790b9).
+ - Added SQL.map/2 and implemented enumerable for SQL [a646203](https://github.com/elixir-dbvisor/sql/commit/a646203da05bc1e59b8f0df65b1a285ab1740a6c).
+ - Added SQL Mix.Task.Compiler for sql files [4ce5b24](https://github.com/elixir-dbvisor/sql/commit/4ce5b243d2ec36d51bc1a3e5a25802b2d4a18b79).
+
 ## v0.3.0 (2025-08-01)
 
 ### Enhancement
