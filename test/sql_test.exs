@@ -15,6 +15,10 @@ defmodule SQLTest do
     sql |> ~SQL[where u.email = {{var}}]
   end
 
+  test "compile time failure" do
+    assert ~s(select A from TABLE_E061_05_01_01 where A like 'foo' escape 'f') == to_string(~SQL[SELECT A FROM TABLE_E061_05_01_01 WHERE A LIKE 'foo' ESCAPE 'f'])
+  end
+
   describe "composable" do
     test "pipedream" do
       sql = ~SQL[from users u]
