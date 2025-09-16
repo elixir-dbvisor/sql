@@ -4,7 +4,6 @@
 # https://standards.iso.org/ittf/PubliclyAvailableStandards/ISO_IEC_9075-1_2023_ed_6_-_id_76583_Publication_PDF_(en).zip
 # "standard/ISO_IEC_9075-2(E)_Foundation.bnf.txt"
 
-
 defmodule SQL.BNF do
   @moduledoc false
 
@@ -217,12 +216,12 @@ defmodule SQL.BNF do
   # def guard(k, n), do: "b#{n} in #{inspect(Enum.uniq(~c"#{<<k>>}#{String.upcase(<<k>>)}"))}"
 
   @doc false
-  def qouted_match(value), do: Enum.reduce(1..byte_size(value), [], fn n, acc -> [acc | [{:"b#{n}", [], Elixir}]] end)
+  def qouted_match(value), do: Enum.reduce(1..byte_size(value), [], fn n, acc -> [{:"b#{n}", [], Elixir}|acc] end)
 
   @doc false
   def qouted_inline_match(value) do
     for <<k <- value>>, reduce: [] do
-      acc -> [acc, k]
+      acc -> [k|acc]
     end
   end
 
@@ -240,4 +239,88 @@ defmodule SQL.BNF do
     {:in, [context: Elixir, imports: [{2, Kernel}]],[{:"b#{n}", [], Elixir},{:sigil_c, [delimiter: "\"", context: Elixir, imports: [{2, Kernel}]],[{:<<>>, [], ["#{<<k>>}#{String.upcase(<<k>>)}"]}, []]}]}
   end
 
+  def get_rules() do
+    operators = [
+      {:asterisk, [type: :mysql], ["*"]},
+      {:solidus, [type: :mysql], ["/"]},
+      {:plus, [type: :mysql], ["+"]},
+      {:minus, [type: :mysql], ["-"]},
+      {:not, [type: :mysql], ["!"]},
+      {:logical_and, [type: :mysql], ["&&"]},
+      {:logical_or, [type: :mysql], ["||"]},
+      {:bitwise_and, [type: :mysql], ["&"]},
+      {:bitwise_and_assignment, [type: :tds], ["&="]},
+      {:bitwise_xor, [type: :mysql], ["^"]},
+      {:bitwise_xor_assignment, [type: :tds], ["^="]},
+      {:bitwise_or, [type: :mysql], ["|"]},
+      {:bitwise_or_assignment, [type: :tds], ["|=", "|*="]},
+      {:bitwise_exclusive_assignment, [type: :sql], ["^-="]},
+      {:bitwise_invasion, [type: :mysql], ["~"]},
+      {:right_shift, [type: :mysql], [">>"]},
+      {:left_shift, [type: :mysql], ["<<"]},
+      {:null_safe_equals_operator, [type: :mysql], ["<=>"]},
+      {:mod, [type: :mysql], ["%"]},
+      {:json_extract, [type: :mysql], ["->"]},
+      {:json_unquote_json_extract, [type: :mysql], ["->>"]},
+      {:assign_value, [type: :mysql], [":="]},
+      {:add_assignment, [type: :tds], ["+="]},
+      {:subtract_assignment, [type: :tds], ["-="]},
+      {:multiply_assignment, [type: :tds], ["*="]},
+      {:divide_assignment, [type: :tds], ["/="]},
+      {:mod_assignment, [type: :tds], ["%="]},
+      {:not_greater_then, [type: :tds], ["!>"]},
+      {:not_less_then, [type: :tds], ["!<"]},
+      {:right_containment, [type: :postgres], ["@>"]},
+      {:left_containment, [type: :postgres], ["<@"]},
+      {:sqaure_root, [type: :postgres], ["|/"]},
+      {:cube_root, [type: :postgres], ["||/"]},
+      {:abs, [type: :postgres], ["@"]},
+      {:bitwise_exclusive_or, [type: :postgres], ["#"]},
+      {:starts_with, [type: :postgres], ["^@"]},
+      {:regex_match, [type: :postgres], ["~*"]},
+      {:not_regex_match_case, [type: :postgres], ["!~"]},
+      {:not_regex_match, [type: :postgres], ["!~*"]},
+      {:bitwise_exclusive_or, [type: :postgres], ["##"]},
+      {:right_extend, [type: :postgres], ["&<"]},
+      {:left_extend, [type: :postgres], ["&>"]},
+      {:right_below, [type: :postgres], ["<<|"]},
+      {:left_below, [type: :postgres], ["|>>"]},
+      {:not_right_extend, [type: :postgres], ["&<|"]},
+      {:not_left_extend, [type: :postgres], ["|&>"]},
+      {:right_below, [type: :postgres], ["<^"]},
+      {:left_below, [type: :postgres], [">^"]},
+      {:object_intersect, [type: :postgres], ["?#"]},
+      {:horizontal_line, [type: :postgres], ["?-"]},
+      {:vertical_line, [type: :postgres], ["?|"]},
+      {:perpendicular_line, [type: :postgres], ["?-|"]},
+      {:parallel_line, [type: :postgres], ["?||"]},
+      {:regex_match, [type: :postgres], ["~="]},
+      {:right_containment, [type: :postgres], ["<<="]},
+      {:left_containment, [type: :postgres], [">>="]},
+      {:tsvector_match, [type: :postgres], ["@@"]},
+      {:negate_tsquery, [type: :postgres], ["!!"]},
+      {:json_extract, [type: :postgres], ["#>"]},
+      {:json_extract_text, [type: :postgres], ["#>>"]},
+      {:json_array_containment, [type: :postgres], ["?&"]},
+      {:json_delete, [type: :postgres], ["#-"]},
+      {:json_path_return, [type: :postgres], ["@?"]},
+      {:ranges_adjacent, [type: :postgres], ["-|-"]},
+      {:cast, [type: :postgres], ["::"]},
+      {:not_equal, [type: :postgres], ["!="]},
+      {:as, [type: :postgres], ["as"]},
+      {:ilike, [type: :postgres], ["ilike"]},
+      {:like, [type: :postgres], ["like"]},
+      {:in, [type: :postgres], ["in"]},
+      {:and, [type: :postgres], ["and"]},
+      {:or, [type: :postgres], ["or"]},
+      {:is, [type: :postgres], ["is"]},
+      {:not, [type: :postgres], ["not"]},
+    ]
+    rules = SQL.BNF.parse(%{
+    "<reserved word>" => ~w[| LIMIT | ILIKE | BACKWARD | FORWARD | ISNULL | NOTNULL],
+    operators: operators,
+    download: true
+    })
+    {Enum.uniq(rules.keywords["<reserved word>"] ++ rules.keywords["<SQL/JSON key word>"]), Enum.uniq(rules.keywords["<non-reserved word>"]), Enum.uniq(Enum.flat_map(rules.operators, &elem(&1, 1)))}
+  end
 end

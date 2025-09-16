@@ -7,11 +7,11 @@ defmodule SQL.Adapters.TDSTest do
 
   describe "with" do
     test "recursive" do
-      assert "with recursive temp (n, fact) as (select 0, 1 union all select n + 1, (n + 1) * fact from temp where n < 9)" == to_string(~SQL[with recursive temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)])
+      assert "with recursive temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)" == to_string(~SQL[with recursive temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)])
     end
 
     test "regular" do
-      assert "with temp (n, fact) as (select 0, 1 union all select n + 1, (n + 1) * fact from temp where n < 9)" == to_string(~SQL[with temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)])
+      assert "with temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)" == to_string(~SQL[with temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)])
     end
   end
 
@@ -96,7 +96,7 @@ defmodule SQL.Adapters.TDSTest do
 
     test "where" do
       assert "where 1 = 2" == to_string(~SQL[where 1 = 2])
-      assert "where 1 = 2" == to_string(~SQL[where 1=2])
+      assert "where 1=2" == to_string(~SQL[where 1=2])
       assert "where 1 != 2" == to_string(~SQL[where 1 != 2])
       assert "where 1 <> 2" == to_string(~SQL[where 1 <> 2])
       assert "where 1 = 2 and id = users.id and id > 3 or true" == to_string(~SQL[where 1 = 2 and id = users.id and id > 3 or true])
@@ -222,43 +222,43 @@ defmodule SQL.Adapters.TDSTest do
   describe "operators" do
     test "=" do
       assert "where id = 1" == to_string(~SQL[where id = 1])
-      assert "where id = 1" == to_string(~SQL[where id=1])
+      assert "where id=1" == to_string(~SQL[where id=1])
     end
     test "-" do
       assert "where id - 1" == to_string(~SQL[where id - 1])
-      assert "where id - 1" == to_string(~SQL[where id-1])
+      assert "where id-1" == to_string(~SQL[where id-1])
     end
     test "+" do
       assert "where id + 1" == to_string(~SQL[where id + 1])
-      assert "where id + 1" == to_string(~SQL[where id+1])
+      assert "where id+1" == to_string(~SQL[where id+1])
     end
     test "*" do
       assert "where id * 1" == to_string(~SQL[where id * 1])
-      assert "where id * 1" == to_string(~SQL[where id*1])
+      assert "where id*1" == to_string(~SQL[where id*1])
     end
     test "/" do
       assert "where id / 1" == to_string(~SQL[where id / 1])
-      assert "where id / 1" == to_string(~SQL[where id/1])
+      assert "where id/1" == to_string(~SQL[where id/1])
     end
     test "<>" do
       assert "where id <> 1" == to_string(~SQL[where id <> 1])
-      assert "where id <> 1" == to_string(~SQL[where id<>1])
+      assert "where id<>1" == to_string(~SQL[where id<>1])
     end
     test ">" do
       assert "where id > 1" == to_string(~SQL[where id > 1])
-      assert "where id > 1" == to_string(~SQL[where id>1])
+      assert "where id>1" == to_string(~SQL[where id>1])
     end
     test "<" do
       assert "where id < 1" == to_string(~SQL[where id < 1])
-      assert "where id < 1" == to_string(~SQL[where id<1])
+      assert "where id<1" == to_string(~SQL[where id<1])
     end
     test ">=" do
       assert "where id >= 1" == to_string(~SQL[where id >= 1])
-      assert "where id >= 1" == to_string(~SQL[where id>=1])
+      assert "where id>=1" == to_string(~SQL[where id>=1])
     end
     test "<=" do
       assert "where id <= 1" == to_string(~SQL[where id <= 1])
-      assert "where id <= 1" == to_string(~SQL[where id<=1])
+      assert "where id<=1" == to_string(~SQL[where id<=1])
     end
     test "between" do
       assert "where id between 1 and 2" == to_string(~SQL[where id between 1 and 2])

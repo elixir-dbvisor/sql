@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: 2025 DBVisor
-
+Application.put_env(:sql, :format, false)
 defmodule SQL.Repo do
   use Ecto.Repo, otp_app: :sql, adapter: Ecto.Adapters.Postgres
 end
