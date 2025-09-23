@@ -4,10 +4,10 @@
 # https://standards.iso.org/ittf/PubliclyAvailableStandards/ISO_IEC_9075-1_2023_ed_6_-_id_76583_Publication_PDF_(en).zip
 # "standard/ISO_IEC_9075-2(E)_Foundation.bnf.txt"
 
-
 defmodule SQL.BNF do
   @moduledoc false
 
+  @doc false
   def parse(opts \\ %{}) do
     case opts do
       %{path: path} ->
@@ -43,7 +43,7 @@ defmodule SQL.BNF do
         cond do
           String.ends_with?(r, "word>") == true ->
             e = if is_map_key(opts, r), do: e ++ opts[r], else: e
-            {[{r, (for v <- e, v not in ["|", "AS"], do: {atom(v), qouted_match(v), qouted_guard(v)})} | keywords], operators, letters, digits, terminals}
+            {[{r, (for v <- e, v not in ["|", "AS"], do: {atom(v), quoted_match(v), quoted_guard(v)})} | keywords], operators, letters, digits, terminals}
           String.ends_with?(r, "letter>") == true -> {keywords, operators, [{r, Enum.reject(e, &(&1 == "|"))}|letters], digits, terminals}
           String.ends_with?(r, "digit>") == true -> {keywords, operators, letters, [{r, Enum.reject(e, &(&1 == "|"))}|digits], terminals}
           String.ends_with?(r, "operator>") == true -> {keywords, [rule | operators], letters, digits, terminals}
@@ -61,8 +61,8 @@ defmodule SQL.BNF do
       {_, _, [b |_]} ->  byte_size(b)
     end, :desc)
     |> Enum.map(fn
-      {r, e} -> {r, (for v <- e, do: {String.to_atom(v), qouted_inline_match(v)})}
-      {r, _, e} -> {r, (for v <- e, do: {String.to_atom(v), qouted_inline_match(v)})}
+      {r, e} -> {r, to_quoted_operator(e)}
+      {r, _, e} -> {r, to_quoted_operator(e)}
     end)
     special_characters = Enum.filter(non_terminals ++ root, &(String.ends_with?(elem(&1, 0), "special character>") || String.ends_with?(elem(&1, 0), "special symbol>")))
     special_characters = for {_, e} <- special_characters, v <- e, v != "|", do: {String.to_atom(v), elem(Enum.find(symbols, {v, v}, &elem(&1, 0) == v), 1)}
@@ -145,6 +145,7 @@ defmodule SQL.BNF do
   defp merge(:terminal, {terminals, non_terminals}, symbol, expr), do: {[map(symbol, expr) | terminals], non_terminals}
   defp merge(:non_terminal, {terminals, non_terminals}, symbol, expr), do: {terminals, [map(symbol, expr) | non_terminals]}
 
+  @doc false
   def choice(value, group \\ [], acc \\ [])
   def choice([], group, []), do: Enum.reverse(group)
   def choice([], [], acc), do: Enum.reverse(acc)
@@ -153,6 +154,7 @@ defmodule SQL.BNF do
   def choice(["|" | rest], group, acc), do: choice(rest, [], [Enum.reverse(group) | acc])
   def choice([k | rest], group, acc), do: choice(rest, [k | group], acc)
 
+  @doc false
   def optional(value, acc \\ [])
   def optional([], acc), do: choice(Enum.reverse(acc))
   def optional(["]" | rest], acc), do: {rest, optional([], acc)}
@@ -164,6 +166,7 @@ defmodule SQL.BNF do
   end
   def optional([node | rest], acc), do: optional(rest, [node | acc])
 
+  @doc false
   def group(value, acc \\ [])
   def group([], acc), do: optional(repeat(Enum.reverse(acc)))
   def group(["}" | rest], acc), do: {rest, {:group, group([], acc)}}
@@ -176,6 +179,7 @@ defmodule SQL.BNF do
   def group([node | rest], acc), do: group(rest, [node | acc])
   def group(expr, acc), do: group([], [expr | acc])
 
+  @doc false
   def repeat(value, acc \\ [])
   def repeat([], acc), do: Enum.reverse(acc)
   def repeat([node, "..." | rest], acc), do: repeat(rest, [{:repeat, node} | acc])
@@ -194,40 +198,38 @@ defmodule SQL.BNF do
     end)}
   end
 
+  @doc false
   def cast(<<?<, b, _::binary>> = expr) when b in ?a..?z or b in ?A..?Z, do: expr
   def cast(expr) when expr in ["|", "{", "}", "[", "]", :ignore, :self, "\u0020", "\u0009", "\u000D", "\u00A0", "\u00A0", "\u1680", "\u2000", "\u2001", "\u2002", "\u2003", "\u2004", "\u2005", "\u2006", "\u2007", "\u2008", "\u2009", "\u200A", "\u202F", "\u205F", "\u3000", "\u180E", "\u200B", "\u200C", "\u200D", "\u2060", "\uFEFF", "\u000A", "\u000B", "\u000C", "\u000D", "\u0085", "\u2028", "\u2029"], do: expr
-  def cast(expr) when is_binary(expr), do: {atom(expr), qouted_match(expr), qouted_guard(expr)}
+  def cast(expr) when is_binary(expr), do: {atom(expr), quoted_match(expr), quoted_guard(expr)}
   def cast(expr) when is_tuple(expr) or is_list(expr) or is_atom(expr), do: expr
 
+  @doc false
   def atom(value), do: String.to_atom(String.replace(String.replace(String.downcase(value), ["<", ">"], ""), ["/", " "], "_"))
-  # def match(value), do: Enum.reduce(1..byte_size(value), "[]", fn n, acc -> "[#{acc}, b#{n}]" end)
-  # def inline_match(value) do
-  #   for <<k <- value>>, reduce: "[]" do
-  #     acc -> "[#{acc}, ?#{<<k>>}]"
-  #   end
-  # end
-
-  # def guard(value) do
-  #   {value, _n} = for <<k <- String.downcase(value)>>, reduce: {"", 1} do
-  #     {"", n} -> {guard(k, n), n+1}
-  #     {acc, n} -> {"#{acc} and #{guard(k, n)}", n+1}
-  #   end
-  #   value
-  # end
-  # def guard(k, n), do: "b#{n} in #{inspect(Enum.uniq(~c"#{<<k>>}#{String.upcase(<<k>>)}"))}"
 
   @doc false
-  def qouted_match(value), do: Enum.reduce(1..byte_size(value), [], fn n, acc -> [acc | [{:"b#{n}", [], Elixir}]] end)
-
-  @doc false
-  def qouted_inline_match(value) do
-    for <<k <- value>>, reduce: [] do
-      acc -> [acc, k]
+  def to_quoted_operator(v) do
+    for e <- v do
+      if String.match?(e, ~r/[^A-Za-z]/) do
+        {String.to_atom(e), quoted_inline_match(e)}
+      else
+        {atom(e), quoted_match(e), quoted_guard(e)}
+      end
     end
   end
 
   @doc false
-  def qouted_guard(value, acc \\ []) do
+  def quoted_match(value), do: Enum.reduce(1..byte_size(value), [], fn n, acc -> [{:"b#{n}", [], Elixir}|acc] end)
+
+  @doc false
+  def quoted_inline_match(value) do
+    for <<k <- value>>, reduce: [] do
+      acc -> [k|acc]
+    end
+  end
+
+  @doc false
+  def quoted_guard(value, acc \\ []) do
     {value, _n} = for <<k <- String.downcase(value)>>, reduce: {acc, 1} do
       {[], n}  -> {__guard__(k, n), n+1}
       {acc, n} -> {{:and, [context: Elixir, imports: [{2, Kernel}]], [acc,__guard__(k, n)]}, n+1}
@@ -240,4 +242,89 @@ defmodule SQL.BNF do
     {:in, [context: Elixir, imports: [{2, Kernel}]],[{:"b#{n}", [], Elixir},{:sigil_c, [delimiter: "\"", context: Elixir, imports: [{2, Kernel}]],[{:<<>>, [], ["#{<<k>>}#{String.upcase(<<k>>)}"]}, []]}]}
   end
 
+  @doc false
+  def get_rules() do
+    operators = [
+      {:asterisk, [type: :mysql], ["*"]},
+      {:solidus, [type: :mysql], ["/"]},
+      {:plus, [type: :mysql], ["+"]},
+      {:minus, [type: :mysql], ["-"]},
+      {:not, [type: :mysql], ["!"]},
+      {:logical_and, [type: :mysql], ["&&"]},
+      {:logical_or, [type: :mysql], ["||"]},
+      {:bitwise_and, [type: :mysql], ["&"]},
+      {:bitwise_and_assignment, [type: :tds], ["&="]},
+      {:bitwise_xor, [type: :mysql], ["^"]},
+      {:bitwise_xor_assignment, [type: :tds], ["^="]},
+      {:bitwise_or, [type: :mysql], ["|"]},
+      {:bitwise_or_assignment, [type: :tds], ["|=", "|*="]},
+      {:bitwise_exclusive_assignment, [type: :sql], ["^-="]},
+      {:bitwise_invasion, [type: :mysql], ["~"]},
+      {:right_shift, [type: :mysql], [">>"]},
+      {:left_shift, [type: :mysql], ["<<"]},
+      {:null_safe_equals_operator, [type: :mysql], ["<=>"]},
+      {:mod, [type: :mysql], ["%"]},
+      {:json_extract, [type: :mysql], ["->"]},
+      {:json_unquote_json_extract, [type: :mysql], ["->>"]},
+      {:assign_value, [type: :mysql], [":="]},
+      {:add_assignment, [type: :tds], ["+="]},
+      {:subtract_assignment, [type: :tds], ["-="]},
+      {:multiply_assignment, [type: :tds], ["*="]},
+      {:divide_assignment, [type: :tds], ["/="]},
+      {:mod_assignment, [type: :tds], ["%="]},
+      {:not_greater_then, [type: :tds], ["!>"]},
+      {:not_less_then, [type: :tds], ["!<"]},
+      {:right_containment, [type: :postgres], ["@>"]},
+      {:left_containment, [type: :postgres], ["<@"]},
+      {:sqaure_root, [type: :postgres], ["|/"]},
+      {:cube_root, [type: :postgres], ["||/"]},
+      {:abs, [type: :postgres], ["@"]},
+      {:bitwise_exclusive_or, [type: :postgres], ["#"]},
+      {:starts_with, [type: :postgres], ["^@"]},
+      {:regex_match, [type: :postgres], ["~*"]},
+      {:not_regex_match_case, [type: :postgres], ["!~"]},
+      {:not_regex_match, [type: :postgres], ["!~*"]},
+      {:bitwise_exclusive_or, [type: :postgres], ["##"]},
+      {:right_extend, [type: :postgres], ["&<"]},
+      {:left_extend, [type: :postgres], ["&>"]},
+      {:right_below, [type: :postgres], ["<<|"]},
+      {:left_below, [type: :postgres], ["|>>"]},
+      {:not_right_extend, [type: :postgres], ["&<|"]},
+      {:not_left_extend, [type: :postgres], ["|&>"]},
+      {:right_below, [type: :postgres], ["<^"]},
+      {:left_below, [type: :postgres], [">^"]},
+      {:object_intersect, [type: :postgres], ["?#"]},
+      {:horizontal_line, [type: :postgres], ["?-"]},
+      {:vertical_line, [type: :postgres], ["?|"]},
+      {:perpendicular_line, [type: :postgres], ["?-|"]},
+      {:parallel_line, [type: :postgres], ["?||"]},
+      {:regex_match, [type: :postgres], ["~="]},
+      {:right_containment, [type: :postgres], ["<<="]},
+      {:left_containment, [type: :postgres], [">>="]},
+      {:tsvector_match, [type: :postgres], ["@@"]},
+      {:negate_tsquery, [type: :postgres], ["!!"]},
+      {:json_extract, [type: :postgres], ["#>"]},
+      {:json_extract_text, [type: :postgres], ["#>>"]},
+      {:json_array_containment, [type: :postgres], ["?&"]},
+      {:json_delete, [type: :postgres], ["#-"]},
+      {:json_path_return, [type: :postgres], ["@?"]},
+      {:ranges_adjacent, [type: :postgres], ["-|-"]},
+      {:cast, [type: :postgres], ["::"]},
+      {:not_equal, [type: :postgres], ["!="]},
+      {:as, [type: :postgres], ["as"]},
+      {:ilike, [type: :postgres], ["ilike"]},
+      {:like, [type: :postgres], ["like"]},
+      {:in, [type: :postgres], ["in"]},
+      {:and, [type: :postgres], ["and"]},
+      {:or, [type: :postgres], ["or"]},
+      {:is, [type: :postgres], ["is"]},
+      {:not, [type: :postgres], ["not"]},
+    ]
+    rules = SQL.BNF.parse(%{
+    "<reserved word>" => ~w[| LIMIT | ILIKE | BACKWARD | FORWARD | ISNULL | NOTNULL],
+    operators: operators,
+    download: true
+    })
+    {Enum.uniq(rules.keywords["<reserved word>"] ++ rules.keywords["<SQL/JSON key word>"]), Enum.uniq(rules.keywords["<non-reserved word>"]), Enum.uniq(Enum.flat_map(rules.operators, &elem(&1, 1)))}
+  end
 end

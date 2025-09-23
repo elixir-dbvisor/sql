@@ -49,7 +49,7 @@ defmodule Mix.Tasks.Sql.Get do
   def to_query(value, :columns) when is_postgres(value), do: ~SQL"select * from information_schema.columns where table_schema not in ('information_schema', 'pg_catalog')"
   def to_query(value, :tables) when is_tds(value), do: ~SQL"select * from information_schema.tables where table_schema not in ('information_schema', 'pg_catalog')"
   def to_query(value, :columns) when is_tds(value), do: ~SQL"select * from information_schema.columns where table_schema not in ('information_schema', 'pg_catalog')"
-  def to_query(value, :tables) when is_mysql(value), do: ~SQL"SELECT * FROM information_schema.tables WHERE table_schema not in('mysql', 'performance_schema', 'sys')"
-  def to_query(value, :columns) when is_mysql(value), do: ~SQL"SELECT * FROM information_schema.columns WHERE table_schema not in('mysql', 'performance_schema', 'sys')"
-  def to_query(value, :tables) when is_sqlite(value), do: ~SQL"SELECT * FROM sqlite_master JOIN pragma_table_info (sqlite_master.name)"
+  def to_query(value, :tables) when is_mysql(value), do: ~SQL"select * from information_schema.tables where table_schema not in ('mysql', 'performance_schema', 'sys')"
+  def to_query(value, :columns) when is_mysql(value), do: ~SQL"select * from information_schema.columns where table_schema not in ('mysql', 'performance_schema', 'sys')"
+  def to_query(value, :tables) when is_sqlite(value), do: ~SQL"select * from sqlite_master join pragma_table_info (sqlite_master.name)"
 end

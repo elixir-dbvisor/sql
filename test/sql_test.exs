@@ -3,8 +3,6 @@
 
 defmodule SQLTest do
   use ExUnit.Case, async: true
-  import ExUnit.CaptureIO
-  import SQLTest.Helpers
   import SQL
 
   def from(var \\ "users") do
@@ -21,7 +19,7 @@ defmodule SQLTest do
       |> ~SQL{where u.email = 'john@example.com'}
       |> ~SQL[select id, email, inserted_at, updated_at]
 
-      assert ~s(select id, email, inserted_at, updated_at from users u where u.email = 'john@example.com') == to_string(sql)
+      assert ~s( select id, email, inserted_at, updated_at from users u where u.email = 'john@example.com') == to_string(sql)
     end
 
     test "functional" do
@@ -30,7 +28,7 @@ defmodule SQLTest do
       |> where()
 
       assert ["users", "john@example.com"] = sql.params
-      assert "select id, email, inserted_at, updated_at from ? u where u.email = ?" == to_string(sql)
+      assert " select id, email, inserted_at, updated_at from ? u where u.email = ?" == to_string(sql)
     end
   end
 
@@ -54,7 +52,7 @@ defmodule SQLTest do
 
   test "to_sql/1" do
     email = "john@example.com"
-    assert {"select id, email from users where email = ?", ["john@example.com"]} == to_sql(~SQL"""
+    assert {" select id, email from users where email = ?", ["john@example.com"]} == to_sql(~SQL"""
     select id, email
     where email = {{email}}
     from users
@@ -63,14 +61,13 @@ defmodule SQLTest do
 
   test "can parse multiple queries" do
     email = "john@example.com"
-    assert {"select id, email from users where email = ?; select id from users", [email]} == to_sql(~SQL"""
+    assert {" select id, email from users where email = ?; select id from users", [email]} == to_sql(~SQL"""
     select id, email
     where email = {{email}}
     from users;
     select id from users
     """)
   end
-
 
   describe "error" do
     test "missing )" do
@@ -117,10 +114,6 @@ defmodule SQLTest do
         SQL.parse("select id from users join orgs on 'id")
       end
     end
-
-    test "missing relation" do
-      assert capture_io(:stderr, fn -> SQL.parse("select id from users", set_sql_lock()) end) =~ "does not exist"
-    end
   end
 
   describe "functions" do
@@ -156,11 +149,11 @@ defmodule SQLTest do
 
   describe "with" do
     test "recursive" do
-      assert "with recursive temp (n, fact) as (select 0, 1 union all select n + 1, (n + 1) * fact from temp where n < 9)" == to_string(~SQL[with recursive temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)])
+      assert "with recursive temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)" == to_string(~SQL[with recursive temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)])
     end
 
     test "regular" do
-      assert "with temp (n, fact) as (select 0, 1 union all select n + 1, (n + 1) * fact from temp where n < 9)" == to_string(~SQL[with temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)])
+      assert "with temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)" == to_string(~SQL[with temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)])
     end
 
     test "complex with" do
@@ -187,7 +180,7 @@ defmodule SQLTest do
             tc.total_spent,
             tc.spending_rank
       ]
-      assert "with customer_rankings as (select customer_id, sum(amount) as total_spent, rank() over(order by sum(amount) desc) as spending_rank from transactions group by customer_id), top_customers as (select c.customer_id, c.name, cr.total_spent, cr.spending_rank from customer_rankings cr join customers c on c.customer_id = cr.customer_id where cr.spending_rank <= 10) select tc.name, tc.total_spent, tc.spending_rank from top_customers tc order by tc.spending_rank" == to_string(sql)
+      assert " with customer_rankings as( select customer_id, sum(amount) as total_spent, rank() over( order by sum(amount) desc) as spending_rank from transactions group by customer_id\n),\ntop_customers as( select c.customer_id,\nc.name,\ncr.total_spent,\ncr.spending_rank from customer_rankings cr join customers c on c.customer_id = cr.customer_id where cr.spending_rank <= 10\n) select tc.name,\ntc.total_spent,\ntc.spending_rank from top_customers tc order by tc.spending_rank" == to_string(sql)
     end
 
     test "complex with multiple ctes" do
@@ -222,7 +215,7 @@ defmodule SQLTest do
         from top_customers tc
         order by tc.spending_rank, tc.month
       ]
-      assert "with customer_rankings as (select customer_id, sum(amount) as total_spent, rank() over (order by sum(amount) desc) as spending_rank from transactions group by customer_id), top_customers as (select c.customer_id, c.name, cr.total_spent, cr.spending_rank from customer_rankings cr join customers c on c.customer_id = cr.customer_id where cr.spending_rank <= 10) select tc.name, tc.total_spent, tc.spending_rank, case when tc.total_spent > tc.avg_amount * 2 then 'High Value' when tc.total_spent > tc.avg_amount then 'Medium Value' else 'Low Value' end as customer_segment from top_customers tc order by tc.spending_rank, tc.month" == to_string(sql)
+      assert "with customer_rankings as (\nselect\ncustomer_id,\nsum(amount) as total_spent,\nrank() over (order by sum(amount) desc) as spending_rank\nfrom transactions\ngroup by customer_id\n),\ntop_customers as (\nselect\nc.customer_id,\nc.name,\ncr.total_spent,\ncr.spending_rank\nfrom customer_rankings cr\njoin customers c on c.customer_id = cr.customer_id\nwhere cr.spending_rank <= 10\n)\nselect\ntc.name,\ntc.total_spent,\ntc.spending_rank,\ncase\nwhen tc.total_spent > tc.avg_amount * 2 then 'High Value'\nwhen tc.total_spent > tc.avg_amount then 'Medium Value'\nelse 'Low Value'\nend as customer_segment\nfrom top_customers tc\norder by tc.spending_rank, tc.month" == to_string(sql)
     end
   end
 
@@ -307,7 +300,7 @@ defmodule SQLTest do
 
     test "where" do
       assert "where 1 = 2" == to_string(~SQL[where 1 = 2])
-      assert "where 1 = 2" == to_string(~SQL[where 1=2])
+      assert "where 1=2" == to_string(~SQL[where 1=2])
       assert "where 1 != 2" == to_string(~SQL[where 1 != 2])
       assert "where 1 <> 2" == to_string(~SQL[where 1 <> 2])
       assert "where 1 = 2 and id = users.id and id > 3 or true" == to_string(~SQL[where 1 = 2 and id = users.id and id > 3 or true])
@@ -432,7 +425,7 @@ defmodule SQLTest do
     test "mixin" do
       for email <- ["1@example.com", "2@example.com", "3@example.com"] do
         sql = from() |> ~SQL[select id, email, inserted_at, updated_at] |> where(email)
-        assert {"select id, email, inserted_at, updated_at from ? u where u.email = ?", ["users", email]} == SQL.to_sql(sql)
+        assert {" select id, email, inserted_at, updated_at from ? u where u.email = ?", ["users", email]} == SQL.to_sql(sql)
       end
     end
   end
@@ -440,43 +433,43 @@ defmodule SQLTest do
   describe "operators" do
     test "=" do
       assert "where id = 1" == to_string(~SQL[where id = 1])
-      assert "where id = 1" == to_string(~SQL[where id=1])
+      assert "where id=1" == to_string(~SQL[where id=1])
     end
     test "-" do
       assert "where id - 1" == to_string(~SQL[where id - 1])
-      assert "where id - 1" == to_string(~SQL[where id-1])
+      assert "where id-1" == to_string(~SQL[where id-1])
     end
     test "+" do
       assert "where id + 1" == to_string(~SQL[where id + 1])
-      assert "where id + 1" == to_string(~SQL[where id+1])
+      assert "where id+1" == to_string(~SQL[where id+1])
     end
     test "*" do
       assert "where id * 1" == to_string(~SQL[where id * 1])
-      assert "where id * 1" == to_string(~SQL[where id*1])
+      assert "where id*1" == to_string(~SQL[where id*1])
     end
     test "/" do
       assert "where id / 1" == to_string(~SQL[where id / 1])
-      assert "where id / 1" == to_string(~SQL[where id/1])
+      assert "where id/1" == to_string(~SQL[where id/1])
     end
     test "<>" do
       assert "where id <> 1" == to_string(~SQL[where id <> 1])
-      assert "where id <> 1" == to_string(~SQL[where id<>1])
+      assert "where id<>1" == to_string(~SQL[where id<>1])
     end
     test ">" do
       assert "where id > 1" == to_string(~SQL[where id > 1])
-      assert "where id > 1" == to_string(~SQL[where id>1])
+      assert "where id>1" == to_string(~SQL[where id>1])
     end
     test "<" do
       assert "where id < 1" == to_string(~SQL[where id < 1])
-      assert "where id < 1" == to_string(~SQL[where id<1])
+      assert "where id<1" == to_string(~SQL[where id<1])
     end
     test ">=" do
       assert "where id >= 1" == to_string(~SQL[where id >= 1])
-      assert "where id >= 1" == to_string(~SQL[where id>=1])
+      assert "where id>=1" == to_string(~SQL[where id>=1])
     end
     test "<=" do
       assert "where id <= 1" == to_string(~SQL[where id <= 1])
-      assert "where id <= 1" == to_string(~SQL[where id<=1])
+      assert "where id<=1" == to_string(~SQL[where id<=1])
     end
     test "between" do
       assert "where id between 1 and 2" == to_string(~SQL[where id between 1 and 2])

@@ -4,38 +4,112 @@
 defmodule SQL.Token do
   @moduledoc false
 
-  @type token :: {atom, keyword, list}
-  @type tokens :: [{atom, keyword, list}]
-
   @doc """
-  Returns a SQL string for a given token.
-  """
-  @doc since: "0.2.0"
-  @doc deprecated: "Use SQL.Token.to_iodata/3 instead"
-  @callback token_to_string(tokens | token) :: String.t()
-
-  @doc """
-  Returns a SQL string for a given token.
+  Returns a SQL iodata for a given token.
   """
   @doc since: "0.3.0"
-  @callback to_iodata(token :: {atom(), keyword(), list()}, context :: map(), indent :: non_neg_integer()) :: iodata()
-
+  @callback to_iodata(token :: {atom(), keyword(), list()} | [{atom(), keyword(), list()}], format :: atom(), case :: atom(), acc :: iodata()) :: iodata()
+  @optional_callbacks to_iodata: 4
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
-      @compile {:inline, to_iodata: 3, to_iodata: 4}
-      @doc false
       @behaviour SQL.Token
-      def token_to_string(token), do: SQL.Adapters.ANSI.token_to_string(token, __MODULE__)
-      def to_iodata(token, context, indent), do: SQL.Adapters.ANSI.module.to_iodata(token, context, indent)
+      @compile {:inline, to_iodata: 4, __to_iodata__: 4, indention: 3, indention: 4}
 
-      def to_iodata([], _context, _indent, acc), do: acc
-      def to_iodata([[]|tokens], context, indent, acc), do: to_iodata(tokens, context, indent, acc)
-      def to_iodata([token|tokens], context, indent, acc), do: to_iodata(tokens, context, indent, [acc|context.module.to_iodata(token, context, indent)])
+      def to_iodata(token, %{format: format, case: case}), do: to_iodata(token, format, case, [])
 
-      def indention(indent, acc \\ [])
-      def indention(0, acc), do: acc
-      def indention(indent, acc), do: indention(indent-1, [?\s, ?\s|acc])
-      defoverridable token_to_string: 1, to_iodata: 3
+      defp to_iodata(token, format, case, acc), do: __to_iodata__(token, format, case, acc)
+
+      defp indention(acc, format, [{:preset, {l,c}}|_]) do
+        indention(acc, format, l, c)
+      end
+      defp indention(acc, format, [_,{:offset, {l,c}}|_]) do
+        indention(acc, format, l, c)
+      end
+      defp indention(acc, format, line, column) when column < 0, do: indention(acc, format, line, 0)
+      defp indention([?\s|_]=acc, :dynamic, line, _column) when line > 1, do: acc
+      defp indention([?\n|_]=acc, :dynamic, line, column) when line > 1, do: [:lists.duplicate(column, ?\s)|acc]
+      defp indention([<<_::binary>>|_]=acc, :dynamic, line, column) when line <= 1 and column <= 1, do: [?\s|acc]
+      defp indention(acc, _format, 0, 0), do: acc
+      defp indention(acc, _format, 0, 1), do: [?\s|acc]
+      defp indention(acc, _format, 1, 0), do: [?\n|acc]
+      defp indention(acc, _format, 0, column), do: [:lists.duplicate(column, ?\s)|acc]
+      defp indention(acc, _format, line, 0), do: [:lists.duplicate(line, ?\n)|acc]
+      defp indention(acc, _format, line, column), do: [:lists.duplicate(line, ?\n), :lists.duplicate(column, ?\s)|acc]
+
+      {reserved, non_reserved, operators} = SQL.BNF.get_rules()
+      for atom <- Enum.uniq(Enum.map(reserved++non_reserved++operators,&elem(&1, 0))) do
+        defp __to_iodata__(unquote(atom), _format, :lower, acc) do
+          [unquote("#{atom}")|acc]
+        end
+        defp __to_iodata__(unquote(atom), _format, :upper, acc) do
+          [unquote(String.upcase("#{atom}"))|acc]
+        end
+      end
+      defp __to_iodata__(:comma, _format, _case, acc) do
+        [?,|acc]
+      end
+      defp __to_iodata__(:dot, _format, _case, acc) do
+        [?.|acc]
+      end
+      defp __to_iodata__(:paren, _format, _case, acc) do
+        [?(,?)|acc]
+      end
+      defp __to_iodata__({:colon, m, values}, format, case, acc) do
+        to_iodata(values, format, case, indention([?;|acc], format, m))
+      end
+      defp __to_iodata__({:binding, m, _}, format, _case, acc) do
+        indention([??|acc], format, m)
+      end
+      defp __to_iodata__({:comment, m, value}, format, _case, acc) do
+        indention([?-,?-,value|acc], format, m)
+      end
+      defp __to_iodata__({:comments, m, value}, format, _case, acc) do
+        indention([?\\,?*,value,?*,?\\|acc], format, m)
+      end
+      defp __to_iodata__({:quote, m, value}, format, _case, acc) do
+        indention([?',value,?'|acc], format, m)
+      end
+      defp __to_iodata__({:backtick, m, value}, format, _case, acc) do
+        indention([?`,value,?`|acc], format, m)
+      end
+      defp __to_iodata__({tag, m, []}, format, case, acc) do
+        indention(to_iodata(tag, format, case, acc), format, m)
+      end
+      defp __to_iodata__({:paren, [_,_,{:offset, {l,c,el,ec}}|_]=m, values}, format, case, acc) do
+        indention([?(|indention(to_iodata(values, format, case, indention([?)|acc], format, el, ec)), format, m)], format, l, c)
+      end
+      defp __to_iodata__({:bracket, m, values}, format, case, acc) do
+        indention([?[|to_iodata(values, format, case, indention([?]|acc], format, m))], format, m)
+      end
+      defp __to_iodata__({_, [], values}, format, case, acc) do
+        to_iodata(values, format, case, acc)
+      end
+      defp __to_iodata__({:ident, [_,_,_,{:tag, tag}|_]=m, [{:paren, _, _}]=values}, format, case, acc) do
+        indention(to_iodata(tag, format, case, to_iodata(values, format, case, acc)), format, m)
+      end
+      defp __to_iodata__({tag, [{:span, {l, c, _, _}}|_]=m, [{_, [{:span, {ll, cc, _, _}}|_], _}]=values}, format, case, acc) when l >= ll and c >= cc do
+        to_iodata(values, format, case, indention(to_iodata(tag, format, case, acc), format, m))
+      end
+      defp __to_iodata__({tag, [_,_,{:type, type}|_]=m, [left, right]}, format, case, acc) when type == :operator or tag in ~w[between cursor for to union except intersect]a do
+        to_iodata(left, format, case, indention(to_iodata(tag, format, case, to_iodata(right, format, case, acc)), format, m))
+      end
+      defp __to_iodata__({tag, m, value}=node, format, _case, acc) when tag in ~w[ident numeric special]a do
+        indention([value|acc], format, m)
+      end
+      defp __to_iodata__({:double_quote, m, value}=node, format, _case, acc) do
+        indention([?", value, ?"|acc], format, m)
+      end
+      defp __to_iodata__({tag, m, values}, format, case, acc) do
+        indention(to_iodata(tag, format, case, to_iodata(values, format, case, acc)), format, m)
+      end
+      defp __to_iodata__([token|tokens], format, case, acc) do
+        to_iodata(token, format, case, to_iodata(tokens, format, case, acc))
+      end
+      defp __to_iodata__([], _format, _case, acc) do
+        acc
+      end
+
+      defoverridable to_iodata: 4
     end
   end
 end

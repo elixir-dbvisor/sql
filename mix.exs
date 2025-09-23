@@ -10,7 +10,7 @@ defmodule SQL.MixProject do
     [
       app: :sql,
       version: @version,
-      elixir: "~> 1.18",
+      elixir: "~> 1.16",
       deps: deps(),
       description: "Brings an extensible SQL parser and sigil to Elixir, confidently write SQL with automatic parameterized queries.",
       name: "SQL",
