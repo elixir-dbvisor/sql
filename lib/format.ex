@@ -5,11 +5,11 @@ defmodule SQL.Format do
   @moduledoc false
   @moduledoc since: "0.4.0"
 
-  @compile {:inline, indention: 3, newline: 1}
+  @compile {:inline, indention: 3, newline: 2}
 
   @doc false
   @doc since: "0.4.0"
-  def to_iodata(tokens, context), do: newline(to_iodata(tokens, context.binding, context.case, context.errors, 0, []))
+  def to_iodata(tokens, context), do: newline(to_iodata(tokens, context.binding, context.case, context.errors, 0, []), 0)
 
   defp indention(acc, [{:preset, {_,0}},_,{:offset, {_,0,_,_}}|_], 0), do: acc
   defp indention(acc, [_,{:offset, {_,0}}|_], 0), do: acc
@@ -18,8 +18,10 @@ defmodule SQL.Format do
   defp indention(acc, _, 2), do: [?\s,?\s,?\s,?\s|acc]
   defp indention(acc, _, indent), do: [:lists.duplicate(?\s, indent*2)|acc]
 
-  defp newline([?\n|_]=acc), do: acc
-  defp newline(acc), do: [?\n|acc]
+  defp newline([?\n, ?\s|acc], 0), do: [?\n|acc]
+  defp newline([?\s|acc], 0), do: [?\n|acc]
+  defp newline([?\n|_]=acc, _indent), do: acc
+  defp newline(acc, _indent), do: [?\n|acc]
 
   newline = ~w[select from join where group having window order limit offset fetch]a
   {reserved, non_reserved, operators} = SQL.BNF.get_rules()
@@ -33,17 +35,17 @@ defmodule SQL.Format do
   end
   for atom <- newline do
     defp to_iodata({unquote(atom), m, values}, binding, :lower=case, errors, indent, acc) do
-      newline(indention([unquote("#{atom}")|newline(to_iodata(values, binding, case, errors, indent+1, acc))], m, indent))
+      newline(indention([unquote("#{atom}")|newline(to_iodata(values, binding, case, errors, indent+1, acc), indent+1)], m, indent), indent)
     end
     defp to_iodata({unquote(atom), m, values}, binding, :upper=case, errors, indent, acc) do
-      newline(indention([unquote(String.upcase("#{atom}"))|newline(to_iodata(values, binding, case, errors, indent+1, acc))], m, indent))
+      newline(indention([unquote(String.upcase("#{atom}"))|newline(to_iodata(values, binding, case, errors, indent+1, acc), indent+1)], m, indent), indent)
     end
   end
   defp to_iodata(:comma, _binding, _case, _errors, 0, acc) do
     [?,|acc]
   end
-  defp to_iodata(:comma, _binding, _case, _errors, _ident, acc) do
-    [?,|newline(acc)]
+  defp to_iodata(:comma, _binding, _case, _errors, indent, acc) do
+    [?,|newline(acc, indent)]
   end
   defp to_iodata(:dot, _binding, _case, _errors, _indent, acc) do
     [?.|acc]
@@ -91,7 +93,7 @@ defmodule SQL.Format do
     to_iodata(values, binding, case, errors, indent, indention(to_iodata(tag, binding, case, errors, indent, acc), m, 0))
   end
   defp to_iodata({tag, m, [left, right]}, binding, case, errors, indent, acc) when tag in ~w[union except intersect]a do
-    to_iodata(left, binding, case, errors, indent, newline(indention(to_iodata(tag, binding, case, errors, indent, to_iodata(right, binding, case, errors, indent, acc)), m, indent)))
+    to_iodata(left, binding, case, errors, indent, newline(indention(to_iodata(tag, binding, case, errors, indent, to_iodata(right, binding, case, errors, indent, acc)), m, indent), indent))
   end
   defp to_iodata({tag, [_,_,{:type, type}|_]=m, [left, right]}, binding, case, errors, indent, acc) when type == :operator or tag in ~w[between cursor for to]a do
     to_iodata(left, binding, case, errors, indent, indention(to_iodata(tag, binding, case, errors, indent, to_iodata(right, binding, case, errors, 0, acc)), m, 0))
