@@ -7,7 +7,7 @@ defmodule SQL.Lexer do
   @zero "illegal zero width character"
   @bidi "illegal bidi character"
   @cgj "illegal cgj character"
-  @context %{idx: 0, file: "nofile", binding: [], aliases: [], errors: [], module: nil, format: :static, case: :lower, sql_lock: nil}
+  @context %{idx: 0, file: "nofile", binding: [], aliases: [], errors: [], module: nil, format: :static, case: :lower, validate: nil}
   def lex(binary, <<file::binary>> \\ "nofile", idx \\ 0) do
     case lex(binary, %{@context | file: file, idx: idx}, 0, 0, []) do
       {:error, error} -> raise TokenMissingError, [{:snippet, binary} | error]

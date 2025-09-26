@@ -259,28 +259,27 @@ defmodule SQL.Parser do
   @order %{select: 0, from: 1, join: 2, where: 3, group: 4, having: 5, window: 6, order: 7, limit: 8, offset: 9, fetch: 10}
   defp sort(acc), do: Enum.sort_by(acc, fn {tag, _, _} -> Map.get(@order, tag) end, :asc)
 
-  defp validate(_, %{sql_lock: nil}, errors), do: errors
-  defp validate({tag, _, _}, %{sql_lock: %{columns: []}}, errors) when tag in ~w[select having where on by order group]a, do: errors
-  defp validate({tag, _, values}, %{sql_lock: %{columns: columns}}, errors) when tag in ~w[select having where on by order group]a do
-    case validate_columns(columns, values, []) do
+  defp validate(_, %{validate: nil}, errors), do: errors
+  defp validate({tag, _, values}, %{validate: fun}, errors) when tag in ~w[select having where on by order group]a do
+    case validate_columns(fun, values, []) do
       [] -> errors
       e -> e++errors
     end
   end
-  defp validate({tag, _, _}, %{sql_lock: %{tables: []}}, errors) when tag in ~w[from join]a, do: errors
-  defp validate({tag, _, values}, %{sql_lock: %{tables: tables}} = context, errors) when tag in ~w[from join]a do
+  defp validate({tag, _, _}, %{validate: nil}, errors) when tag in ~w[from join]a, do: errors
+  defp validate({tag, _, values}, %{validate: fun} = context, errors) when tag in ~w[from join]a do
     values
     |> Enum.reduce([], fn
       {:paren, _, _}, acc -> acc
       {:on, _, _} = node, acc -> validate(node, context, acc)
-      {tag, _, _}=node, acc when tag in ~w[ident double_quote]a -> validate_table(tables, node, acc)
-      {:as, _, [{tag, _, _}=node, _]}, acc when tag in ~w[ident double_quote]a  -> validate_table(tables, node, acc)
-      {:dot, _, [_, {tag, _, _}=node]}, acc when tag in ~w[ident double_quote]a -> validate_table(tables, node, acc)
-      {:dot, _, [_, {:bracket, _, [{:ident, _, _}=node]}]}, acc -> validate_table(tables, node, acc)
-      {:comma, _, [{:dot, _, [_, {:bracket, _, [{:ident, _, _}=node]}]}]}, acc -> validate_table(tables, node, acc)
-      {:comma, _, [{:dot, _, [_, {tag, _, _}=node]}]}, acc when tag in ~w[ident double_quote]a -> validate_table(tables, node, acc)
-      {:comma, _, [{:as, _, [{tag, _, _}=node, _]}]}, acc when tag in ~w[ident double_quote]a  -> validate_table(tables, node, acc)
-      {:comma, _, [{tag, _, _}=node]}, acc when tag in ~w[ident double_quote]a -> validate_table(tables, node, acc)
+      {tag, _, _}=node, acc when tag in ~w[ident double_quote]a -> validate_table(fun, node, acc)
+      {:as, _, [{tag, _, _}=node, _]}, acc when tag in ~w[ident double_quote]a  -> validate_table(fun, node, acc)
+      {:dot, _, [_, {tag, _, _}=node]}, acc when tag in ~w[ident double_quote]a -> validate_table(fun, node, acc)
+      {:dot, _, [_, {:bracket, _, [{:ident, _, _}=node]}]}, acc -> validate_table(fun, node, acc)
+      {:comma, _, [{:dot, _, [_, {:bracket, _, [{:ident, _, _}=node]}]}]}, acc -> validate_table(fun, node, acc)
+      {:comma, _, [{:dot, _, [_, {tag, _, _}=node]}]}, acc when tag in ~w[ident double_quote]a -> validate_table(fun, node, acc)
+      {:comma, _, [{:as, _, [{tag, _, _}=node, _]}]}, acc when tag in ~w[ident double_quote]a  -> validate_table(fun, node, acc)
+      {:comma, _, [{tag, _, _}=node]}, acc when tag in ~w[ident double_quote]a -> validate_table(fun, node, acc)
     end)
     |> case do
       [] -> errors
@@ -290,21 +289,21 @@ defmodule SQL.Parser do
   defp validate({tag, _, [{t, _, _}]}, _, errors) when tag in ~w[offset limit]a and t in ~w[numeric binary hexadecimal octal]a, do: errors
   defp validate({tag, _, _} = node, _, errors) when tag in ~w[offset limit]a, do: [node|errors]
 
-  defp validate_table(tables, {_, _, value}=node, acc)  do
-    case Enum.find(tables, false, fn %{table_name: {_, _, fun}} -> fun.(value) end) do
+  defp validate_table(fun, {_, _, value}=node, acc)  do
+    case fun.(value) do
       true -> acc
       false -> [node|acc]
     end
   end
 
-  defp validate_columns(columns, {tag, _, value}=node, acc) when tag in ~w[ident double_quote]a do
-    case Enum.find(columns, false, fn %{column_name: {_, _, fun}} -> fun.(value) end) do
+  defp validate_columns(fun, {tag, _, value}=node, acc) when tag in ~w[ident double_quote]a do
+    case fun.(value) do
       true -> acc
       false -> [node|acc]
     end
   end
-  defp validate_columns(columns, [node|values], acc) do
-    validate_columns(columns, values, validate_columns(columns, node, acc))
+  defp validate_columns(fun, [node|values], acc) do
+    validate_columns(fun, values, validate_columns(fun, node, acc))
   end
-  defp validate_columns(_columns, _, acc), do: acc
+  defp validate_columns(_fun, _, acc), do: acc
 end

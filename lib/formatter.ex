@@ -10,7 +10,7 @@ defmodule SQL.MixFormatter do
 
   @impl Mix.Tasks.Format
   def format(source, opts) do
-    opts = Map.new(Keyword.merge([sql_lock: nil], opts))
+    opts = Map.new(Keyword.merge([validate: nil], opts))
     {:ok, context, tokens} = SQL.Lexer.lex(source)
     {:ok, context, tokens} = SQL.Parser.parse(tokens, Map.merge(context, opts))
     iodata = SQL.Format.to_iodata(tokens, context)

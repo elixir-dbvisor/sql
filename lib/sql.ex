@@ -14,14 +14,12 @@ defmodule SQL do
       @doc false
       import SQL
       if File.exists?(Path.relative_to_cwd("sql.lock")) do
-        config = Keyword.merge([case: :lower, adapter: Application.compile_env(:sql, :adapter, ANSI), lock: build_lock()], opts)
-        Module.put_attribute(__MODULE__, :sql_config, Map.new(config))
-        def sql_config, do: unquote(Macro.escape(Map.new(config)))
+        Module.put_attribute(__MODULE__, :sql_config, %{case: opts[:case] || :lower, adapter: opts[:adapter] || Application.compile_env(:sql, :adapter, ANSI), validate: &__MODULE__.sql_validate/1})
+        def sql_validate, do: unquote(build_lock())
       else
-        IO.warn("Could not find a sql.lock, please run mix sql.get")
-        config = Keyword.merge([case: :lower, adapter: Application.compile_env(:sql, :adapter, ANSI), lock: nil], opts)
-        Module.put_attribute(__MODULE__, :sql_config, Map.new(config))
-        def sql_config, do: unquote(Macro.escape(Map.new(config)))
+        # IO.warn("Could not find a sql.lock, please run mix sql.get")
+        Module.put_attribute(__MODULE__, :sql_config, %{case: opts[:case] || :lower, adapter: opts[:adapter] || Application.compile_env(:sql, :adapter, ANSI), validate: nil})
+        def sql_validate, do: fn _ -> true end
       end
     end
   end
@@ -95,7 +93,7 @@ defmodule SQL do
 
   @doc false
   def build(left, {:<<>>, _, _} = right, _modifiers, env) do
-    config = %{case: :lower, adapter: Application.get_env(:sql, :adapter, ANSI), lock: nil}
+    config = %{case: :lower, adapter: Application.get_env(:sql, :adapter, ANSI), validate: nil}
     config = if env.module, do: Module.get_attribute(env.module, :sql_config, config), else: config
     sql = struct(SQL, module: config.adapter)
     stack = if env.function do
@@ -107,7 +105,7 @@ defmodule SQL do
       {:static, data} ->
         id = id(data)
         {:ok, context, tokens} = SQL.Lexer.lex(data, env.file)
-        {:ok, context, tokens} = SQL.Parser.parse(tokens, %{context|sql_lock: config.lock, module: config.adapter, case: config.case})
+        {:ok, context, tokens} = SQL.Parser.parse(tokens, %{context|validate: config.validate, module: config.adapter, case: config.case})
         sql = %{sql | idx: context.idx, tokens: tokens, string: IO.iodata_to_binary(context.module.to_iodata(tokens, context)), inspect: __inspect__(tokens, context, stack), id: id}
         case context.binding do
           []     -> Macro.escape(sql)
@@ -126,7 +124,7 @@ defmodule SQL do
             end)
           {:ok, context, tokens} = tokens(right, file, idx, sql.id)
           tokens = t++tokens
-          {string, inspect} = plan(tokens, %{context|sql_lock: config.lock, module: config.adapter, format: :dynamic}, sql.id, stack)
+          {string, inspect} = plan(tokens, %{context|validate: config.validate, module: config.adapter, format: :dynamic}, sql.id, stack)
           %{sql | params: p++cast_params(context.binding, binding(), env, []), tokens: tokens, string: string, inspect: inspect}
         end
     end
@@ -215,46 +213,18 @@ defmodule SQL do
   @doc false
   def build_lock() do
     case elem(Code.eval_file("sql.lock", File.cwd!()), 0) do
-      %{tables: tables, columns: columns} = data ->
-        %{data |
-        tables: Enum.map(tables, fn %{table_name: table_name} = table -> %{table | table_name: to_match(table_name)} end),
-        columns: Enum.map(columns, fn %{table_name: table_name, column_name: column_name} = column -> %{column | table_name: to_match(table_name), column_name: to_match(column_name)} end)
-      }
-      data -> data
+      %{tables: tables, columns: columns} ->
+      tables = Enum.map(tables, fn %{table_name: value} -> String.downcase(value) end)
+      columns = Enum.map(columns, fn %{table_name: table_name, column_name: column_name} -> {String.downcase(table_name), String.downcase(column_name)} end)
+      quote bind_quoted: [tables: tables, columns: columns] do
+        fn
+          {table, column} -> {String.downcase(table), String.downcase(column)} in columns
+          table -> String.downcase(table) in tables
+        end
+      end
+      _data ->
+        nil
     end
-  end
-
-  @doc false
-  def to_match(value), do: {value, atom(value), function(value)}
-
-  @doc false
-  def function(value) do
-    {:fn, [], [head(value),{:->, [], [[{:_, [], Elixir}], false]}]}
-    |> Code.eval_quoted()
-    |> elem(0)
-  end
-
-  @doc false
-  def atom(value), do: String.to_atom(String.downcase(value))
-
-  @doc false
-  def match(value), do: Enum.reduce(1..byte_size(value), [], fn n, acc -> [acc | [{:"b#{n}", [], Elixir}]] end)
-
-  @doc false
-  def head(value), do: {:->, [], [[{:when, [],[match(value),guard(value)]}], true]}
-
-  @doc false
-  def guard(value, acc \\ []) do
-    {value, _n} = for <<k <- String.downcase(value)>>, reduce: {acc, 1} do
-      {[], n}  -> {__guard__(k, n), n+1}
-      {acc, n} -> {{:and, [context: Elixir, imports: [{2, Kernel}]], [acc,__guard__(k, n)]}, n+1}
-    end
-    value
-  end
-
-  @doc false
-  def __guard__(k, n) do
-    {:in, [context: Elixir, imports: [{2, Kernel}]],[{:"b#{n}", [], Elixir},{:sigil_c, [delimiter: "\"", context: Elixir, imports: [{2, Kernel}]],[{:<<>>, [], ["#{<<k>>}#{String.upcase(<<k>>)}"]}, []]}]}
   end
 
   @doc false
