@@ -8,11 +8,8 @@ defmodule SQL.Token do
   Returns a SQL iodata for a given token.
   """
   @doc since: "0.3.0"
-  @callback to_iodata(token :: {atom(), keyword(), list()} | [{atom(), keyword(), list()}], format :: atom(), case :: atom(), acc :: iodata()) :: iodata()
-  @optional_callbacks to_iodata: 4
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
-      @behaviour SQL.Token
       @compile {:inline, to_iodata: 4, __to_iodata__: 4, indention: 3, indention: 4}
 
       def to_iodata(token, %{format: format, case: case}), do: to_iodata(token, format, case, [])
