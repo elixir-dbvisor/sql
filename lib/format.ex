@@ -9,7 +9,7 @@ defmodule SQL.Format do
 
   @doc false
   @doc since: "0.4.0"
-  def to_iodata(tokens, context), do: newline(to_iodata(tokens, context.binding, context.case, context.errors, 0, []), 0)
+  def to_iodata(tokens, context, indent \\ 0), do: newline(to_iodata(tokens, context.binding, context.case, context.errors, indent, []), indent)
 
   defp indention(acc, [{:preset, {_,0}},_,{:offset, {_,0,_,_}}|_], 0), do: acc
   defp indention(acc, [_,{:offset, {_,0}}|_], 0), do: acc
@@ -27,18 +27,18 @@ defmodule SQL.Format do
   {reserved, non_reserved, operators} = SQL.BNF.get_rules()
   for atom <- Enum.uniq(Enum.map(reserved++non_reserved++operators,&elem(&1, 0))), atom not in newline do
     defp to_iodata(unquote(atom), _binding ,:lower, _errors, _indent, acc) do
-      [unquote("#{atom}")|acc]
+      ["\e[35m", unquote("#{atom}"), "\e[0m"|acc]
     end
     defp to_iodata(unquote(atom), _binding, :upper, _errors, _indent, acc) do
-     [unquote(String.upcase("#{atom}"))|acc]
+     ["\e[35m", unquote(String.upcase("#{atom}")), "\e[0m"|acc]
     end
   end
   for atom <- newline do
     defp to_iodata({unquote(atom), m, values}, binding, :lower=case, errors, indent, acc) do
-      newline(indention([unquote("#{atom}")|newline(to_iodata(values, binding, case, errors, indent+1, acc), indent+1)], m, indent), indent)
+      newline(indention(["\e[35m", unquote("#{atom}"), "\e[0m"|newline(to_iodata(values, binding, case, errors, indent+1, acc), indent+1)], m, indent), indent)
     end
     defp to_iodata({unquote(atom), m, values}, binding, :upper=case, errors, indent, acc) do
-      newline(indention([unquote(String.upcase("#{atom}"))|newline(to_iodata(values, binding, case, errors, indent+1, acc), indent+1)], m, indent), indent)
+      newline(indention(["\e[35m", unquote(String.upcase("#{atom}")), "\e[0m"|newline(to_iodata(values, binding, case, errors, indent+1, acc), indent+1)], m, indent), indent)
     end
   end
   defp to_iodata(:comma, _binding, _case, _errors, 0, acc) do
@@ -66,10 +66,10 @@ defmodule SQL.Format do
     [?\\,?*,value,?*,?\\|acc]
   end
   defp to_iodata({:quote, m, value}, _binding, _case, _errors, indent, acc) do
-    indention([?',value,?'|acc], m, indent)
+    indention([?',"\e[32m" , value, "\e[0m",?'|acc], m, indent)
   end
   defp to_iodata({:backtick, m, value}, _binding, _case, _errors, indent, acc) do
-    indention([?`,value,?`|acc], m, indent)
+    indention([?`,"\e[32m" , value, "\e[0m",?`|acc], m, indent)
   end
   defp to_iodata({tag, m, []}, binding, case, errors, indent, acc) do
     indention(to_iodata(tag, binding, case, errors, indent, acc), m, indent)
@@ -101,13 +101,13 @@ defmodule SQL.Format do
   defp to_iodata({tag, m, value}=node, _binding, _case, errors, indent, acc) when tag in ~w[ident numeric special]a do
     case node in errors do
       true -> indention(["\e[31m", value, "\e[0m"|acc], m, indent)
-      false -> indention([value|acc], m, indent)
+      false -> indention(["\e[33m", value, "\e[0m"|acc], m, indent)
     end
   end
   defp to_iodata({:double_quote, m, value}=node, _binding, _case, errors, indent, acc) do
     case node in errors do
       true -> indention([?","\e[31m",value, "\e[0m", ?"|acc], m, indent)
-      false -> indention([?", value, ?"|acc], m, indent)
+      false -> indention([?", "\e[32m" , value, "\e[0m", ?"|acc], m, indent)
     end
   end
   defp to_iodata({tag, m, values}, binding, case, errors, indent, acc) do

@@ -25,8 +25,8 @@ defmodule SQL.ParserTest do
   describe "error" do
     test "missing table with sql.lock and with tables in it" do
       {:ok, context, tokens} = SQL.Lexer.lex(@query)
-      {:ok, %{errors: errors}, _tokens} = SQL.Parser.parse(tokens, SQLTest.Helpers.set_sql_lock(context))
-      assert length(errors) == 20
+      {:ok, %{errors: errors}, _tokens} = SQL.Parser.parse(tokens, SQLTest.Helpers.set_validate(context))
+      assert length(errors) == 30
     end
 
     test "missing table with sql.lock and without tables in it" do

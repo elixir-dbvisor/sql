@@ -266,11 +266,9 @@ defmodule SQL.Parser do
       e -> e++errors
     end
   end
-  defp validate({tag, _, _}, %{validate: nil}, errors) when tag in ~w[from join]a, do: errors
   defp validate({tag, _, values}, %{validate: fun} = context, errors) when tag in ~w[from join]a do
     values
     |> Enum.reduce([], fn
-      {:paren, _, _}, acc -> acc
       {:on, _, _} = node, acc -> validate(node, context, acc)
       {tag, _, _}=node, acc when tag in ~w[ident double_quote]a -> validate_table(fun, node, acc)
       {:as, _, [{tag, _, _}=node, _]}, acc when tag in ~w[ident double_quote]a  -> validate_table(fun, node, acc)
@@ -279,7 +277,8 @@ defmodule SQL.Parser do
       {:comma, _, [{:dot, _, [_, {:bracket, _, [{:ident, _, _}=node]}]}]}, acc -> validate_table(fun, node, acc)
       {:comma, _, [{:dot, _, [_, {tag, _, _}=node]}]}, acc when tag in ~w[ident double_quote]a -> validate_table(fun, node, acc)
       {:comma, _, [{:as, _, [{tag, _, _}=node, _]}]}, acc when tag in ~w[ident double_quote]a  -> validate_table(fun, node, acc)
-      {:comma, _, [{tag, _, _}=node]}, acc when tag in ~w[ident double_quote]a -> validate_table(fun, node, acc)
+      {:comma, _, [{tag, _, _}=node|_]}, acc when tag in ~w[ident double_quote]a -> validate_table(fun, node, acc)
+      _, acc -> acc
     end)
     |> case do
       [] -> errors
@@ -290,18 +289,19 @@ defmodule SQL.Parser do
   defp validate({tag, _, _} = node, _, errors) when tag in ~w[offset limit]a, do: [node|errors]
 
   defp validate_table(fun, {_, _, value}=node, acc)  do
-    case fun.(value) do
+    case fun.(value, nil) do
       true -> acc
       false -> [node|acc]
     end
   end
 
   defp validate_columns(fun, {tag, _, value}=node, acc) when tag in ~w[ident double_quote]a do
-    case fun.(value) do
+    case fun.(nil, value) do
       true -> acc
       false -> [node|acc]
     end
   end
+  defp validate_columns(fun, {_, _, values}, acc), do: validate_columns(fun, values, acc)
   defp validate_columns(fun, [node|values], acc) do
     validate_columns(fun, values, validate_columns(fun, node, acc))
   end

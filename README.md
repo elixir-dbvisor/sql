@@ -61,6 +61,35 @@ iex(6)> inspect(sql)
   [%User{id: 1, email: "john@example.com"}, %User{id: 2, email: "jane@example.com"}]
 ```
 
+## Compile time errors
+run `mix sql.get` to generate your `sql.lock` file which is used for error reporting.
+
+```elixir
+  ==> myapp
+  Compiling 1 file (.ex)
+  warning:
+    the relation OPS does not exist
+    the relation email is mentioned 2 times but does not exist
+    the relation users does not exist
+    ~SQL"""
+    select
+      email,
+      1 + "OPS"
+    from
+      users
+    where
+      email = 'john@example.com'
+    """
+    lib/myapp.ex:18: Myapp.list_users/0
+    (sql 0.4.0) lib/sql.ex:225: SQL.__inspect__/3
+    (sql 0.4.0) lib/sql.ex:115: SQL.build/4
+    (elixir 1.20.0-dev) src/elixir_dispatch.erl:263: :elixir_dispatch.expand_macro_fun/7
+    (elixir 1.20.0-dev) src/elixir_dispatch.erl:122: :elixir_dispatch.dispatch_import/6
+    (elixir 1.20.0-dev) src/elixir_clauses.erl:192: :elixir_clauses.def/3
+    (elixir 1.20.0-dev) src/elixir_def.erl:218: :elixir_def."-store_definition/10-lc$^0/1-0-"/3
+    (elixir 1.20.0-dev) src/elixir_def.erl:219: :elixir_def.store_definition/10
+```
+
 ## Benchmark
 You can find benchmark results [here](https://github.com/elixir-dbvisor/sql/benchmarks) or run `mix sql.bench`
 

@@ -13,14 +13,16 @@ defmodule SQL do
     quote bind_quoted: [opts: opts] do
       @doc false
       import SQL
-      if File.exists?(Path.relative_to_cwd("sql.lock")) do
-        Module.put_attribute(__MODULE__, :sql_config, %{case: opts[:case] || :lower, adapter: opts[:adapter] || Application.compile_env(:sql, :adapter, ANSI), validate: &__MODULE__.sql_validate/1})
-        def sql_validate, do: unquote(build_lock())
-      else
-        # IO.warn("Could not find a sql.lock, please run mix sql.get")
-        Module.put_attribute(__MODULE__, :sql_config, %{case: opts[:case] || :lower, adapter: opts[:adapter] || Application.compile_env(:sql, :adapter, ANSI), validate: nil})
-        def sql_validate, do: fn _ -> true end
-      end
+      config = Map.new(Keyword.merge([case: :lower, adapter: Application.compile_env(:sql, :adapter, ANSI), validate: fn _, _ -> true end],  opts))
+      @external_resource Path.relative_to_cwd("sql.lock")
+      config = with true <- File.exists?(Path.relative_to_cwd("sql.lock")),
+                    %{validate: validate} <- elem(Code.eval_file("sql.lock", File.cwd!()), 0) do
+                    %{config | validate: validate}
+               else
+                _ -> config
+               end
+      Module.put_attribute(__MODULE__, :sql_config, config)
+      def sql_repo, do: unquote(opts[:repo] || config.adapter)
     end
   end
 
@@ -93,9 +95,9 @@ defmodule SQL do
 
   @doc false
   def build(left, {:<<>>, _, _} = right, _modifiers, env) do
-    config = %{case: :lower, adapter: Application.get_env(:sql, :adapter, ANSI), validate: nil}
+    config = %{case: :lower, adapter: Application.get_env(:sql, :adapter, ANSI), validate: fn _, _ -> true end}
     config = if env.module, do: Module.get_attribute(env.module, :sql_config, config), else: config
-    sql = struct(SQL, module: config.adapter)
+    sql = struct(SQL, module: env.module)
     stack = if env.function do
               {env.module, elem(env.function, 0), elem(env.function, 1), [file: Path.relative_to_cwd(env.file), line: env.line]}
             else
@@ -105,6 +107,7 @@ defmodule SQL do
       {:static, data} ->
         id = id(data)
         {:ok, context, tokens} = SQL.Lexer.lex(data, env.file)
+        %{context|validate: config.validate, module: config.adapter, case: config.case}
         {:ok, context, tokens} = SQL.Parser.parse(tokens, %{context|validate: config.validate, module: config.adapter, case: config.case})
         sql = %{sql | idx: context.idx, tokens: tokens, string: IO.iodata_to_binary(context.module.to_iodata(tokens, context)), inspect: __inspect__(tokens, context, stack), id: id}
         case context.binding do
@@ -117,7 +120,7 @@ defmodule SQL do
 
       {:dynamic, data} ->
         sql = %{sql | id: id(data)}
-        quote bind_quoted: [left: Macro.unpipe(left), right: right, file: env.file, data: data, sql: Macro.escape(sql), env: Macro.escape(env), config: Macro.escape(config), stack: Macro.escape(stack)] do
+        quote bind_quoted: [left: Macro.unpipe(left), right: right, file: env.file, data: data, sql: Macro.escape(sql), env: Macro.escape(env), config: Macro.escape(%{config| validate: nil}), stack: Macro.escape(stack)] do
           {t,p,idx} = Enum.reduce(left, {[], [], 0}, fn
             {[], 0}, acc        -> acc
             {v, 0}, {t, p, idx} -> {t++v.tokens, p++v.params, idx+v.idx}
@@ -211,25 +214,8 @@ defmodule SQL do
   end
 
   @doc false
-  def build_lock() do
-    case elem(Code.eval_file("sql.lock", File.cwd!()), 0) do
-      %{tables: tables, columns: columns} ->
-      tables = Enum.map(tables, fn %{table_name: value} -> String.downcase(value) end)
-      columns = Enum.map(columns, fn %{table_name: table_name, column_name: column_name} -> {String.downcase(table_name), String.downcase(column_name)} end)
-      quote bind_quoted: [tables: tables, columns: columns] do
-        fn
-          {table, column} -> {String.downcase(table), String.downcase(column)} in columns
-          table -> String.downcase(table) in tables
-        end
-      end
-      _data ->
-        nil
-    end
-  end
-
-  @doc false
   def __inspect__(tokens, context, stack) do
-    inspect = IO.iodata_to_binary(["~SQL\"\"\""|[SQL.Format.to_iodata(tokens, context)|~c"\n\"\"\""]])
+    inspect = IO.iodata_to_binary(["\e[0m", "  ~SQL\"\"\""|[SQL.Format.to_iodata(tokens, context, 1)|~c"\n  \"\"\""]])
     case context.errors do
       [] -> inspect
       errors ->
@@ -241,10 +227,10 @@ defmodule SQL do
 
   @doc false
   def format_error(errors), do: Enum.group_by(errors, &elem(&1, 2)) |> Enum.reduce([], fn
-    {k, [{:special, _, _}]}, acc -> [acc|["the operator \e[31m",k,"\e[0m is invalid, did you mean any of #{__suggest__(k)}\n"]]
-    {k, [{:special, _, _}|_]=v}, acc -> [acc|["the operator \e[31m",k,"\e[0m is mentioned #{length(v)} times but is invalid, did you mean any of #{__suggest__(k)}\n"]]
-    {k, [_]}, acc -> [acc|["the relation \e[31m",k,"\e[0m does not exist\n"]]
-    {k, v}, acc -> [acc|["the relation \e[31m",k,"\e[0m is mentioned #{length(v)} times but does not exist\n"]]
+    {k, [{:special, _, _}]}, acc -> [acc|["  the operator \e[31m",k,"\e[0m is invalid, did you mean any of #{__suggest__(k)}\n"]]
+    {k, [{:special, _, _}|_]=v}, acc -> [acc|["  the operator \e[31m",k,"\e[0m is mentioned #{length(v)} times but is invalid, did you mean any of #{__suggest__(k)}\n"]]
+    {k, [_]}, acc -> [acc|["  the relation \e[31m",k,"\e[0m does not exist\n"]]
+    {k, v}, acc -> [acc|["  the relation \e[31m",k,"\e[0m is mentioned #{length(v)} times but does not exist\n"]]
   end)
 
   @doc false
@@ -257,8 +243,13 @@ defmodule SQL do
     def member?(_enumerable, _element) do
       {:error, __MODULE__}
     end
+    def reduce(%SQL{fn: nil} = enumerable, acc, fun) do
+      repo = enumerable.module.sql_repo()
+      %{rows: rows, columns: columns} = repo.query!(enumerable.string, enumerable.params)
+      Enumerable.reduce(rows, acc, fn row, acc -> fun.(Map.new(Enum.zip(columns, row)), acc) end)
+    end
     def reduce(%SQL{} = enumerable, acc, fun) do
-      repo = enumerable.module.sql_config()[:repo]
+      repo = enumerable.module.sql_repo()
       %{rows: rows, columns: columns} = repo.query!(enumerable.string, enumerable.params)
       fun = case Function.info(enumerable.fn, :arity) do
               {:arity, 1} -> fn row, acc -> fun.(enumerable.fn.(row), acc) end
