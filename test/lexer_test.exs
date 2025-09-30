@@ -9,10 +9,10 @@ defmodule SQL.LexerTest do
       assert {:ok, _, [{:colon, [{:span, {1, 9, 1, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\nSELECT 2;")
     end
     test "U+000D cr" do
-      assert {:ok, _, [{:colon, [{:span, {0, 19, 0, 19}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\rSELECT 2;")
+      assert {:ok, _, [{:colon, [{:span, {1, 9, 1, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\rSELECT 2;")
     end
     test "U+000D+000A crlf" do
-      assert {:ok, _, [{:colon, [{:span, {1, 9, 1, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\r\nSELECT 2;")
+      assert {:ok, _, [{:colon, [{:span, {2, 9, 2, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\r\nSELECT 2;")
     end
     test "U+0085 nel" do
       assert {:ok, _, [{:colon, [{:span, {1, 9, 1, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\u0085SELECT 2;")

@@ -43,7 +43,7 @@ defmodule SQL.BNF do
         cond do
           String.ends_with?(r, "word>") == true ->
             e = if is_map_key(opts, r), do: e ++ opts[r], else: e
-            {[{r, (for v <- e, v not in ["|", "AS"], do: {atom(v), quoted_match(v), quoted_guard(v)})} | keywords], operators, letters, digits, terminals}
+            {[{r, (for v <- e, v not in ["|", "AS"], do: {atom(v), quoted_inline_match(v)})} | keywords], operators, letters, digits, terminals}
           String.ends_with?(r, "letter>") == true -> {keywords, operators, [{r, Enum.reject(e, &(&1 == "|"))}|letters], digits, terminals}
           String.ends_with?(r, "digit>") == true -> {keywords, operators, letters, [{r, Enum.reject(e, &(&1 == "|"))}|digits], terminals}
           String.ends_with?(r, "operator>") == true -> {keywords, [rule | operators], letters, digits, terminals}
@@ -201,7 +201,7 @@ defmodule SQL.BNF do
   @doc false
   def cast(<<?<, b, _::binary>> = expr) when b in ?a..?z or b in ?A..?Z, do: expr
   def cast(expr) when expr in ["|", "{", "}", "[", "]", :ignore, :self, "\u0020", "\u0009", "\u000D", "\u00A0", "\u00A0", "\u1680", "\u2000", "\u2001", "\u2002", "\u2003", "\u2004", "\u2005", "\u2006", "\u2007", "\u2008", "\u2009", "\u200A", "\u202F", "\u205F", "\u3000", "\u180E", "\u200B", "\u200C", "\u200D", "\u2060", "\uFEFF", "\u000A", "\u000B", "\u000C", "\u000D", "\u0085", "\u2028", "\u2029"], do: expr
-  def cast(expr) when is_binary(expr), do: {atom(expr), quoted_match(expr), quoted_guard(expr)}
+  def cast(expr) when is_binary(expr), do: {atom(expr), quoted_inline_match(expr)}
   def cast(expr) when is_tuple(expr) or is_list(expr) or is_atom(expr), do: expr
 
   @doc false
@@ -213,34 +213,18 @@ defmodule SQL.BNF do
       if String.match?(e, ~r/[^A-Za-z]/) do
         {String.to_atom(e), quoted_inline_match(e)}
       else
-        {atom(e), quoted_match(e), quoted_guard(e)}
+        {atom(e), quoted_inline_match(e)}
       end
     end
   end
 
   @doc false
-  def quoted_match(value), do: Enum.reduce(1..byte_size(value), [], fn n, acc -> [{:"b#{n}", [], Elixir}|acc] end)
-
-  @doc false
   def quoted_inline_match(value) do
-    for <<k <- value>>, reduce: [] do
+    for <<k <- String.downcase(value)>>, reduce: [] do
       acc -> [k|acc]
     end
   end
 
-  @doc false
-  def quoted_guard(value, acc \\ []) do
-    {value, _n} = for <<k <- String.downcase(value)>>, reduce: {acc, 1} do
-      {[], n}  -> {__guard__(k, n), n+1}
-      {acc, n} -> {{:and, [context: Elixir, imports: [{2, Kernel}]], [acc,__guard__(k, n)]}, n+1}
-    end
-    value
-  end
-
-  @doc false
-  def __guard__(k, n) do
-    {:in, [context: Elixir, imports: [{2, Kernel}]],[{:"b#{n}", [], Elixir},{:sigil_c, [delimiter: "\"", context: Elixir, imports: [{2, Kernel}]],[{:<<>>, [], ["#{<<k>>}#{String.upcase(<<k>>)}"]}, []]}]}
-  end
 
   @doc false
   def get_rules() do

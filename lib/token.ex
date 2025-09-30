@@ -90,6 +90,9 @@ defmodule SQL.Token do
       defp __to_iodata__({tag, [_,_,{:type, type}|_]=m, [left, right]}, format, case, acc) when type == :operator or tag in ~w[between cursor for to union except intersect]a do
         to_iodata(left, format, case, indention(to_iodata(tag, format, case, to_iodata(right, format, case, acc)), format, m))
       end
+      defp __to_iodata__({:ident, m, value}=node, format, :upper, acc) do
+        indention([:string.uppercase(value)|acc], format, m)
+      end
       defp __to_iodata__({tag, m, value}=node, format, _case, acc) when tag in ~w[ident numeric special]a do
         indention([value|acc], format, m)
       end

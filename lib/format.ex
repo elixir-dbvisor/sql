@@ -11,8 +11,9 @@ defmodule SQL.Format do
   @doc since: "0.4.0"
   def to_iodata(tokens, context, indent \\ 0), do: newline(to_iodata(tokens, context.binding, context.case, context.errors, indent, []), indent)
 
-  defp indention(acc, [{:preset, {_,0}},_,{:offset, {_,0,_,_}}|_], 0), do: acc
+  defp indention(acc, [{:preset, {_,0}},_,{:offset, {_,0,_,_}}|_], _), do: acc
   defp indention(acc, [_,{:offset, {_,0}}|_], 0), do: acc
+  defp indention(["\e[33m"|_]=acc, [_,{:offset, {_,0}}|_], _), do: acc
   defp indention(acc, _, 0), do: [?\s|acc]
   defp indention(acc, _, 1), do: [?\s,?\s|acc]
   defp indention(acc, _, 2), do: [?\s,?\s,?\s,?\s|acc]
