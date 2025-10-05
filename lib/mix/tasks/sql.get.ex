@@ -24,7 +24,7 @@ defmodule Mix.Tasks.Sql.Get do
 
   defp get(repo) do
     sql = to_query(repo.__adapter__())
-    {:ok, %{columns: columns, rows: rows}} = repo.query(to_string(sql), [])
+    {:ok, %{columns: columns, rows: rows}} = repo.query(sql.string, sql.params)
     columns = Enum.map(columns, &String.to_atom(String.downcase(&1)))
     Enum.map(rows, &Map.new(Enum.zip(columns, &1)))
   end

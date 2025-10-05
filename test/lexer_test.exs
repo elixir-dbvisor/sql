@@ -6,61 +6,61 @@ defmodule SQL.LexerTest do
 
   describe "newline" do
     test "U+000A lf" do
-      assert {:ok, _, [{:colon, [{:span, {1, 9, 1, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\nSELECT 2;")
+      assert {:ok, _, [{:colon, [{:span, {1, 8, 1, 8, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\nSELECT 2;")
     end
     test "U+000D cr" do
-      assert {:ok, _, [{:colon, [{:span, {1, 9, 1, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\rSELECT 2;")
+      assert {:ok, _, [{:colon, [{:span, {1, 8, 1, 8, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\rSELECT 2;")
     end
     test "U+000D+000A crlf" do
-      assert {:ok, _, [{:colon, [{:span, {2, 9, 2, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\r\nSELECT 2;")
+      assert {:ok, _, [{:colon, [{:span, {2, 8, 2, 8, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\r\nSELECT 2;")
     end
     test "U+0085 nel" do
-      assert {:ok, _, [{:colon, [{:span, {1, 9, 1, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\u0085SELECT 2;")
+      assert {:ok, _, [{:colon, [{:span, {1, 8, 1, 8, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\u0085SELECT 2;")
     end
     test "U+2028 line separator" do
-      assert {:ok, _, [{:colon, [{:span, {1, 9, 1, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\u2028SELECT 2;")
+      assert {:ok, _, [{:colon, [{:span, {1, 8, 1, 8, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\u2028SELECT 2;")
     end
     test "U+2029 paragraph" do
-      assert {:ok, _, [{:colon, [{:span, {1, 9, 1, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\u2029SELECT 2;")
+      assert {:ok, _, [{:colon, [{:span, {1, 8, 1, 8, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\u2029SELECT 2;")
     end
     test "U+000C form feed" do
-      assert {:ok, _, [{:colon, [{:span, {1, 2, 1, 2}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\f1;")
+      assert {:ok, _, [{:colon, [{:span, {1, 1, 1, 1, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\f1;")
     end
     test "U+000B vertical tab" do
-      assert {:ok, _, [{:colon, [{:span, {1, 2, 1, 2}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\v1;")
+      assert {:ok, _, [{:colon, [{:span, {1, 1, 1, 1, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\v1;")
     end
   end
 
   describe "spaces" do
     test "U+0020" do
-      assert {:ok, _, [{:colon, [{:span, {0, 9, 0, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u00201;")
+      assert {:ok, _, [{:colon, [{:span, {0, 8, 0, 8, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u00201;")
     end
     test "U+00A0 no-break" do
-      assert {:ok, _, [{:colon, [{:span, {0, 9, 0, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u00A01;")
+      assert {:ok, _, [{:colon, [{:span, {0, 8, 0, 8, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u00A01;")
     end
     test "U+1680 ogham" do
-      assert {:ok, _, [{:colon, [{:span, {0, 9, 0, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u16801;")
+      assert {:ok, _, [{:colon, [{:span, {0, 8, 0, 8, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u16801;")
     end
     test "U+2002 en" do
-      assert {:ok, _, [{:colon, [{:span, {0, 9, 0, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u20021;")
+      assert {:ok, _, [{:colon, [{:span, {0, 8, 0, 8, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u20021;")
     end
     test "U+2003 em" do
-      assert {:ok, _, [{:colon, [{:span, {0, 9, 0, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u20031;")
+      assert {:ok, _, [{:colon, [{:span, {0, 8, 0, 8, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u20031;")
     end
     test "U+2009 thin" do
-      assert {:ok, _, [{:colon, [{:span, {0, 9, 0, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u20091;")
+      assert {:ok, _, [{:colon, [{:span, {0, 8, 0, 8, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u20091;")
     end
     test "U+202F narrow no-break" do
-      assert {:ok, _, [{:colon, [{:span, {0, 9, 0, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u202F1;")
+      assert {:ok, _, [{:colon, [{:span, {0, 8, 0, 8, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u202F1;")
     end
     test "U+205F medium mathematical" do
-      assert {:ok, _, [{:colon, [{:span, {0, 9, 0, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u205F1;")
+      assert {:ok, _, [{:colon, [{:span, {0, 8, 0, 8, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u205F1;")
     end
     test "U+3000 ideographic" do
-      assert {:ok, _, [{:colon, [{:span, {0, 9, 0, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u30001;")
+      assert {:ok, _, [{:colon, [{:span, {0, 8, 0, 8, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\u30001;")
     end
     test "U+0009 tab" do
-      assert {:ok, _, [{:colon, [{:span, {0, 9, 0, 9}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\t1;")
+      assert {:ok, _, [{:colon, [{:span, {0, 8, 0, 8, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT\t1;")
     end
   end
 
@@ -170,10 +170,10 @@ defmodule SQL.LexerTest do
 
   describe "multiline" do
     test "line separator before from" do
-      assert {:ok, _, [{:colon, [{:span, {1, 10, 1, 10}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\u2028FROM dual;")
+      assert {:ok, _, [{:colon, [{:span, {1, 9, 1, 9, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\u2028FROM dual;")
     end
     test "paragraph separator before from" do
-      assert {:ok, _, [{:colon, [{:span, {1, 10, 1, 10}}, {:offset, {0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\u2029FROM dual;")
+      assert {:ok, _, [{:colon, [{:span, {1, 9, 1, 9, 0, 0}}|_], _}|_]} = SQL.Lexer.lex("SELECT 1;\u2029FROM dual;")
     end
   end
 end

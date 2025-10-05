@@ -16,7 +16,7 @@ defmodule SQL do
       config = Map.new(Keyword.merge([case: :lower, adapter: Application.compile_env(:sql, :adapter, ANSI), validate: fn _, _ -> true end],  opts))
       @external_resource Path.relative_to_cwd("sql.lock")
       config = with true <- File.exists?(Path.relative_to_cwd("sql.lock")),
-                    %{validate: validate} <- elem(Code.eval_file("sql.lock", File.cwd!()), 0) do
+                    %{validate: validate, columns: _columns} <- elem(Code.eval_file("sql.lock", File.cwd!()), 0) do
                     %{config | validate: validate}
                else
                 _ -> config
@@ -26,10 +26,14 @@ defmodule SQL do
     end
   end
 
-  defstruct [tokens: [], idx: 0, params: [], module: nil, id: nil, string: nil, inspect: nil, fn: nil]
+  defstruct [tokens: [], idx: 0, params: [], module: nil, id: nil, string: nil, inspect: nil, fn: nil, context: nil]
 
   defimpl Inspect, for: SQL do
-    def inspect(sql, _opts), do: sql.inspect
+    def inspect(%{inspect: nil, tokens: tokens, context: context}, _opts) do
+      {:current_stacktrace, stack} = Process.info(self(), :current_stacktrace)
+      SQL.__inspect__(tokens, context, hd(stack))
+    end
+    def inspect(%{inspect: inspect}, _opts), do: inspect
   end
 
   defimpl String.Chars, for: SQL do
@@ -90,7 +94,7 @@ defmodule SQL do
   def parse(binary, params \\ [], module \\ ANSI) do
     {:ok, context, tokens} = SQL.Lexer.lex(binary)
     {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
-    struct(SQL, tokens: tokens, string: IO.iodata_to_binary(module.to_iodata(tokens, context)), params: params)
+    struct(SQL, tokens: tokens, context: context, string: IO.iodata_to_binary(module.to_iodata(tokens, context)), params: params)
   end
 
   @doc false
@@ -109,7 +113,9 @@ defmodule SQL do
         {:ok, context, tokens} = SQL.Lexer.lex(data, env.file)
         %{context|validate: config.validate, module: config.adapter, case: config.case}
         {:ok, context, tokens} = SQL.Parser.parse(tokens, %{context|validate: config.validate, module: config.adapter, case: config.case})
-        sql = %{sql | idx: context.idx, tokens: tokens, string: IO.iodata_to_binary(context.module.to_iodata(tokens, context)), inspect: __inspect__(tokens, context, stack), id: id}
+        string = IO.iodata_to_binary(context.module.to_iodata(tokens, context))
+        inspect = __inspect__(tokens, context, stack)
+        sql = %{sql | idx: context.idx, tokens: tokens, string: string, inspect: inspect, id: id}
         case context.binding do
           []     -> Macro.escape(sql)
           params ->

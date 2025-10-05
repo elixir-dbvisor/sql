@@ -27,29 +27,9 @@ defmodule SQL.Parser do
   defp parse([], context, unit, acc, root, [], errors) do
     {:ok, %{context | errors: errors++context.errors}, unit++acc++root}
   end
-  defp parse([{:paren=t,[{:span, {l,c,_,_}}|_]=m,a},{tt,[{:span, {_,_,_,c}},_,{:type, :reserved}|_]=mm,aa}|tokens], context, unit, acc, root, acc2, errors) do
+  defp parse([{:paren=t,m,a},{tt,[_,{:type, :reserved}|_]=mm,aa}|tokens], context, unit, acc, root, acc2, errors) do
     {:ok, context, a} = parse(a, context)
-    preset = case a do
-      [{_, [{:span, {pl,pc,_,_}}|_], _}|_] -> {pl-l, (pc-c)-1}
-      _ -> {0,0}
-    end
-    parse(tokens, context, [{tt,mm,[{t,[{:preset, preset}|m],a}|aa]}|unit], acc, root, acc2, errors)
-  end
-  defp parse([{:paren=t,[{:span, {l,c,_,_}}|_]=m,a}, {_,[{:span, {_,_,_,c}}|_],_} = r,{:recursive=tt,mm,aa}|tokens], context, unit, acc, root, acc2, errors) do
-    {:ok, context, a} = parse(a, context)
-    preset = case a do
-      [{_, [{:span, {pl,pc,_,_}}|_], _}|_] -> {pl-l, (pc-c)-1}
-      _ -> {0,0}
-    end
-    parse(tokens, context, [{tt,mm,[{:fn, [], [r, {t,[{:preset, preset}|m],a}]}|aa]}|unit], acc, root, acc2, errors)
-  end
-  defp parse([{:paren=t,[{:span, {l,c,_,_}}|_]=m,a},{:ident,[{:span, {_,_,_,c}}|_],_}=r|tokens], context, unit, acc, root, acc2, errors) do
-    {:ok, context, a} = parse(a, context)
-    preset = case a do
-      [{_, [{:span, {pl,pc,_,_}}|_], _}|_] -> {pl-l, (pc-c)-1}
-      _ -> {0,0}
-    end
-    parse(tokens, context, [{:fn, [], [r, {t,[{:preset, preset}|m],a}]}|unit], acc, root, acc2, errors)
+    parse(tokens, context, [{tt,mm,[{t,m,a}|aa]}|unit], acc, root, acc2, errors)
   end
   defp parse([{:with=t, m, unit}|tokens], context, a, acc, root, acc2, errors) do
     {a, context} = __parse__(a, context)
@@ -81,19 +61,19 @@ defmodule SQL.Parser do
   defp parse([l,{:dot=t,tm,ta},r|tokens], context, unit, acc, root, acc2, errors) do
     parse(tokens, context, [{t,tm,[r,l|ta]}|unit], acc, root, acc2, errors)
   end
-  defp parse([r,{:in=t,tm,ta},l,{t2,[_,_,_,{:tag,t3}|_]=t3m,_},{:fetch=f,fm,fa}|tokens], context, []=unit, []=acc, root, acc2, errors) when t3 in ~w[absolute relative]a or t2 in ~w[backward forward]a do
+  defp parse([r,{:in=t,tm,ta},l,{t2,[_,_,{:tag,t3}|_]=t3m,_},{:fetch=f,fm,fa}|tokens], context, []=unit, []=acc, root, acc2, errors) when t3 in ~w[absolute relative]a or t2 in ~w[backward forward]a do
     parse(tokens, context, unit, acc, [{f,fm,[{t,tm,[{t3,t3m,[l]},r|ta]}|fa]}|root], acc2, errors)
   end
-  defp parse([r,{:in=t,tm,ta},{_,[_,_,_,{:tag,l}|_]=lm,_la},{:fetch=f,fm,fa}|tokens], context, []=unit, []=acc, root, acc2, errors) do
+  defp parse([r,{:in=t,tm,ta},{_,[_,_,{:tag,l}|_]=lm,_la},{:fetch=f,fm,fa}|tokens], context, []=unit, []=acc, root, acc2, errors) do
     parse(tokens, context, unit, acc, [{f,fm,[{t,tm,[{l,lm,[]},r|ta]}|fa]}|root], acc2, errors)
   end
   defp parse([r,{:in=t,tm,ta},l,{:fetch=f,fm,fa}|tokens], context, []=unit, []=acc, root, acc2, errors) do
     parse(tokens, context, unit, acc, [{f,fm,[{t,tm,[l,r|ta]}|fa]}|root], acc2, errors)
   end
-  defp parse([r,{:from=t,tm,ta},l,{t2,[_,_,_,{:tag,t3}|_]=t3m,_},{:fetch=f,fm,fa}|tokens], context, []=unit, []=acc, root, acc2, errors) when t3 in ~w[absolute relative]a or t2 in ~w[backward forward]a do
+  defp parse([r,{:from=t,tm,ta},l,{t2,[_,_,{:tag,t3}|_]=t3m,_},{:fetch=f,fm,fa}|tokens], context, []=unit, []=acc, root, acc2, errors) when t3 in ~w[absolute relative]a or t2 in ~w[backward forward]a do
     parse(tokens, context, unit, acc, [{f,fm,[{t3,t3m,[l]}, {t,tm,[r|ta]}|fa]}|root], acc2, errors)
   end
-  defp parse([r,{:from=t,tm,ta},{_,[_,_,_,{:tag,l}|_]=lm,_la},{:fetch=f,fm,fa}|tokens], context, []=unit, []=acc, root, acc2, errors) do
+  defp parse([r,{:from=t,tm,ta},{_,[_,_,{:tag,l}|_]=lm,_la},{:fetch=f,fm,fa}|tokens], context, []=unit, []=acc, root, acc2, errors) do
     parse(tokens, context, unit, acc, [{f,fm,[{l,lm,[]},{t,tm,[r|ta]}|fa]}|root], acc2, errors)
   end
   defp parse([r,{:from=t,tm,ta},l,{:fetch=f,fm,fa}|tokens], context, []=unit, []=acc, root, acc2, errors) do
@@ -103,36 +83,20 @@ defmodule SQL.Parser do
     {a, context} = __parse__(a, context)
     parse(tokens, context, unit, [{t,m,a++acc}], root, acc2, errors)
   end
-  defp parse([{_,[_,_,_,{:tag,t}|_]=m,_}|tokens], context, unit, acc, root, acc2, errors) when t in ~w[asc desc]a do
+  defp parse([{_,[_,_,{:tag,t}|_]=m,_}|tokens], context, unit, acc, root, acc2, errors) when t in ~w[asc desc]a do
     parse(tokens, context, [{t,m,[]}|unit], acc, root, acc2, errors)
   end
-  defp parse([{:paren=r,[{:span, {rl,rc,_,_}}|_]=rm,ra}, {:all=a, am, aa}, {t, tm, []=ta}, {:paren=l, [{:span, {ll,lc,_,_}}|_]=lm, la}|tokens], context, unit, acc, root, acc2, errors) when t in ~w[except intersect union]a do
+  defp parse([{:paren=r,rm,ra},{:all=a, am, aa},{t, tm, []=ta}, {:paren=l, lm, la}|tokens], context, unit, acc, root, acc2, errors) when t in ~w[except intersect union]a do
     {:ok, context, la} = parse(la, context)
     {:ok, context, ra} = parse(ra, context)
-    lpreset = case la do
-      [{_, [{:span, {pl,pc,_,_}}|_], _}|_] -> {pl-ll, (pc-lc)-1}
-      _ -> {0,0}
-    end
-    rpreset = case ra do
-      [{_, [{:span, {pl,pc,_,_}}|_], _}|_] -> {pl-rl, (pc-rc)-1}
-      _ -> {0,0}
-    end
-    parse(tokens, context, unit, acc, [{t,tm,[{l,[{:preset, lpreset}|lm],la},{a, am, [{r, [{:preset, rpreset}|rm], ra}|aa]}|ta]}|root], acc2, errors)
+    parse(tokens, context, unit, acc, [{t,tm,[{l,lm,la},{a, am, [{r, rm, ra}|aa]}|ta]}|root], acc2, errors)
   end
-  defp parse([{:paren=r,[{:span, {rl,rc,_,_}}|_]=rm,ra}, {t, tm, []=ta}, {:paren=l, [{:span, {ll,lc,_,_}}|_]=lm, la}|tokens], context, unit, acc, root, acc2, errors) when t in ~w[except intersect union]a do
+  defp parse([{:paren=r,rm,ra},{t, tm, []=ta},{:paren=l, lm, la}|tokens], context, unit, acc, root, acc2, errors) when t in ~w[except intersect union]a do
     {:ok, context, la} = parse(la, context)
     {:ok, context, ra} = parse(ra, context)
-    lpreset = case la do
-      [{_, [{:span, {pl,pc,_,_}}|_], _}|_] -> {pl-ll, (pc-lc)-1}
-      _ -> {0,0}
-    end
-    rpreset = case ra do
-      [{_, [{:span, {pl,pc,_,_}}|_], _}|_] -> {pl-rl, (pc-rc)-1}
-      _ -> {0,0}
-    end
-    parse(tokens, context, unit, acc, [{t,tm,[{l,[{:preset, lpreset}|lm],la},{r, [{:preset, rpreset}|rm], ra}|ta]}|root], acc2, errors)
+    parse(tokens, context, unit, acc, [{t,tm,[{l,lm,la},{r,rm,ra}|ta]}|root], acc2, errors)
   end
-  defp parse([{a, am, []}, {t, tm, []=ta}, {:paren=l, [{:span, {ll,cc,_,_}}|_]=lm, la}|tokens], context, unit, acc, root, acc2, errors) when t in ~w[except intersect union]a and a in ~w[all distinct]a do
+  defp parse([{a, am, []}, {t, tm, []=ta}, {:paren=l, lm, la}|tokens], context, unit, acc, root, acc2, errors) when t in ~w[except intersect union]a and a in ~w[all distinct]a do
     {:ok, context, la} = parse(la, context)
     sorted = sort(root)
     context = if sorted != root do
@@ -140,13 +104,9 @@ defmodule SQL.Parser do
     else
       context
     end
-    preset = case la do
-      [{_, [{:span, {pl,pc,_,_}}|_], _}|_] -> {pl-ll, (pc-cc)-1}
-      _ -> {0,0}
-    end
-    parse(tokens, context, unit, acc, [{t,tm,[{l, [{:preset, preset}|lm], la},{a, am, sorted}|ta]}], acc2, errors)
+    parse(tokens, context, unit, acc, [{t,tm,[{l, lm, la},{a, am, sorted}|ta]}], acc2, errors)
   end
-  defp parse([{t, tm, []=ta}, {:paren=r, [{:span, {l,c,_,_}}|_]=rm, ra}|tokens], context, []=unit, []=acc, root, acc2, errors) when t in ~w[except intersect union]a do
+  defp parse([{t, tm, []=ta}, {:paren=r,rm,ra}|tokens], context, []=unit, []=acc, root, acc2, errors) when t in ~w[except intersect union]a do
     {:ok, context, ra} = parse(ra, context)
     sorted = sort(root)
     context = if sorted != root do
@@ -154,11 +114,7 @@ defmodule SQL.Parser do
     else
       context
     end
-    preset = case ra do
-      [{_, [{:span, {pl,pc,_,_}}|_], _}|_] -> {pl-l, (pc-c)-1}
-      _ -> {0,0}
-    end
-    parse(tokens, context, unit, acc, [{t,tm,[{r, [{:preset, preset}|rm], ra}, sorted|ta]}], acc2, errors)
+    parse(tokens, context, unit, acc, [{t,tm,[{r,rm,ra},sorted|ta]}], acc2, errors)
   end
   defp parse([{a, am, []}, {t, tm, []=ta}|tokens], context, unit, []=acc, root, acc2, errors) when t in ~w[except intersect union]a and a in ~w[all distinct]a do
     right = if unit == [], do: root, else: unit
@@ -216,18 +172,9 @@ defmodule SQL.Parser do
     node = {t,m,a++acc}
     parse(tokens, context, unit, unit, [node|root], acc2, validate(node, context, errors))
   end
-  defp parse([{:paren=t,[{:span, {l,c,_,_}}|_]=m,a}|tokens], context, unit, acc, root, acc2, errors) do
+  defp parse([{:paren=t,m,a}|tokens], context, unit, acc, root, acc2, errors) do
     {:ok, context, a} = parse(a, context)
-    preset = case a do
-      [{tag, _, [[{_, [{:span, {pl,pc,_,_}}|_], _}|_]|_]}|_] when tag in ~w[except intersect union]a ->
-        {pl-l, (pc-c)-1}
-      [{_, [_,_,{:type, :operator}|_], [{_, [{:span, {pl,pc,_,_}}|_], _}|_]}|_] ->
-        {pl-l, (pc-c)-1}
-      [{_, [{:span, {pl,pc,_,_}}|_], _}|_] ->
-        {pl-l, (pc-c)-1}
-      _ -> {0,0}
-    end
-    parse(tokens, context, [{t,[{:preset, preset}|m],a}|unit], acc, root, acc2, errors)
+    parse(tokens, context, [{t,m,a}|unit], acc, root, acc2, errors)
   end
   defp parse([{:table=tt,mt,at}, {:create=tc,mc,ac}|tokens], context, unit, acc, root, acc2, errors) do
     parse(tokens, context, at, acc, [{tc,mc,[{tt,mt,unit++acc}|ac]}|root], acc2, errors)
@@ -251,9 +198,9 @@ defmodule SQL.Parser do
   defp __parse__([b,{:is=c,cm,[]=ca},{:not=n,nm,[]=na},{t,_,[]}=node|rest],context) when t in ~w[false true unknown null binding]a, do: __parse__([{c,cm,[b,{n,nm,[node|na]}|ca]}|rest],context)
   defp __parse__([b,{:is=c,cm,[]=ca},{t,_,[]}=node|rest],context) when t in ~w[false true unknown null binding]a, do: __parse__([{c,cm,[b,node|ca]}|rest],context)
   defp __parse__([b,{:not=n,nm,[]=na},{:in=c,cm,[]=ca},node|rest],context), do: __parse__([{c,cm,[{n,nm,[b|na]},node|ca]}|rest],context)
-  defp __parse__([{tl,[_,_,{:type, :literal}|_],a}=l,{tr,[_,_,{:type, :literal}|_],as}=r|rest],context) when tl in ~w[ident double_quote bracket dot binding]a and tr in ~w[ident double_quote bracket dot binding]a, do: __parse__([{:as, [], [l,r]}|rest], %{context | aliases: [{as, a}|context.aliases]})
-  defp __parse__([b,{c,[_,_,{:type, :operator}|_]=cm,[]=ca},n|rest],context), do: __parse__([{c,cm,[b,n|ca]}|rest],context)
-  defp __parse__([t,t2,b,{c,[_,_,{:type, :operator}|_]=cm,[]=ca},n|rest],context), do: __parse__([t,t2,{c,cm,[b,n|ca]}|rest],context)
+  defp __parse__([{tl,[_,{_, :literal}|_],a}=l,{tr,[_,{_, :literal}|_],as}=r|rest],context) when tl in ~w[ident double_quote bracket dot binding]a and tr in ~w[ident double_quote bracket dot binding]a, do: __parse__([{:as, [], [l,r]}|rest], %{context | aliases: [{as, a}|context.aliases]})
+  defp __parse__([b,{c,[_,{_, :operator}|_]=cm,[]=ca},n|rest],context), do: __parse__([{c,cm,[b,n|ca]}|rest],context)
+  defp __parse__([t,t2,b,{c,[_,{_, :operator}|_]=cm,[]=ca},n|rest],context), do: __parse__([t,t2,{c,cm,[b,n|ca]}|rest],context)
   defp __parse__(unit, context), do: {unit, context}
 
   @order %{select: 0, from: 1, join: 2, where: 3, group: 4, having: 5, window: 6, order: 7, limit: 8, offset: 9, fetch: 10}

@@ -47,12 +47,12 @@ defmodule SQLTest do
 
 
   test "inspect/1" do
-    assert ~s(\e[0m~SQL\"\"\"\n\e[35mselect\e[0m\n  \e[35m+\e[0m\e[33m1000\e[0m\n\"\"\") == inspect(~SQL[select +1000])
+    assert ~s(\e[0m~SQL\"\"\"\n\e[35mselect\e[0m\n \e[35m+\e[0m\e[33m1000\e[0m\n\"\"\") == inspect(~SQL[select +1000])
   end
 
   test "to_sql/1" do
     email = "john@example.com"
-    assert {" select id, email from users where email = ?", ["john@example.com"]} == to_sql(~SQL"""
+    assert {" select id, email\nfrom users\nwhere email = ?", ["john@example.com"]} == to_sql(~SQL"""
     select id, email
     where email = {{email}}
     from users
@@ -61,7 +61,7 @@ defmodule SQLTest do
 
   test "can parse multiple queries" do
     email = "john@example.com"
-    assert {" select id, email from users where email = ?; select id from users", [email]} == to_sql(~SQL"""
+    assert {" select id, email\nfrom users\nwhere email = ?;\nselect id from users", [email]} == to_sql(~SQL"""
     select id, email
     where email = {{email}}
     from users;
@@ -180,7 +180,7 @@ defmodule SQLTest do
             tc.total_spent,
             tc.spending_rank
       ]
-      assert " with customer_rankings as( select customer_id, sum(amount) as total_spent, rank() over( order by sum(amount) desc) as spending_rank from transactions group by customer_id\n),\ntop_customers as( select c.customer_id,\nc.name,\ncr.total_spent,\ncr.spending_rank from customer_rankings cr join customers c on c.customer_id = cr.customer_id where cr.spending_rank <= 10\n) select tc.name,\ntc.total_spent,\ntc.spending_rank from top_customers tc order by tc.spending_rank" == to_string(sql)
+      assert "\n      with customer_rankings as(\n          select customer_id,\n                sum(amount) as total_spent,\n                rank() over( order by sum(amount) desc) as spending_rank\n          from transactions\n          group by customer_id\n      ),\n      top_customers as(\n          select c.customer_id,\n                c.name,\n                cr.total_spent,\n                cr.spending_rank\n          from customer_rankings cr\n          join customers c on c.customer_id = cr.customer_id\n          where cr.spending_rank <= 10\n      )\n      select tc.name,\n            tc.total_spent,\n            tc.spending_rank\n      from top_customers tc\n      order by tc.spending_rank" == to_string(sql)
     end
 
     test "complex with multiple ctes" do
@@ -215,7 +215,7 @@ defmodule SQLTest do
         from top_customers tc
         order by tc.spending_rank, tc.month
       ]
-      assert "with customer_rankings as (\nselect\ncustomer_id,\nsum(amount) as total_spent,\nrank() over (order by sum(amount) desc) as spending_rank\nfrom transactions\ngroup by customer_id\n),\ntop_customers as (\nselect\nc.customer_id,\nc.name,\ncr.total_spent,\ncr.spending_rank\nfrom customer_rankings cr\njoin customers c on c.customer_id = cr.customer_id\nwhere cr.spending_rank <= 10\n)\nselect\ntc.name,\ntc.total_spent,\ntc.spending_rank,\ncase\nwhen tc.total_spent > tc.avg_amount * 2 then 'High Value'\nwhen tc.total_spent > tc.avg_amount then 'Medium Value'\nelse 'Low Value'\nend as customer_segment\nfrom top_customers tc\norder by tc.spending_rank, tc.month" == to_string(sql)
+      assert "\n        with customer_rankings as (\n          select\n            customer_id,\n            sum(amount) as total_spent,\n            rank() over (order by sum(amount) desc) as spending_rank\n          from transactions\n          group by customer_id\n        ),\n        top_customers as (\n          select\n            c.customer_id,\n            c.name,\n            cr.total_spent,\n            cr.spending_rank\n          from customer_rankings cr\n          join customers c on c.customer_id = cr.customer_id\n          where cr.spending_rank <= 10\n        )\n        select\n          tc.name,\n          tc.total_spent,\n          tc.spending_rank,\n          case\n            when tc.total_spent > tc.avg_amount * 2 then 'High Value'\n            when tc.total_spent > tc.avg_amount then 'Medium Value'\n            else 'Low Value'\n          end as customer_segment\n        from top_customers tc\n        order by tc.spending_rank, tc.month" == to_string(sql)
     end
   end
 
