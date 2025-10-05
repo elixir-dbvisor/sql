@@ -23,7 +23,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: 28
-          elixir-version: main
+          elixir-version: 1.19.0-rc.1
       - uses: actions/cache@v4
         with:
           path: |
