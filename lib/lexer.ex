@@ -18,36 +18,6 @@ defmodule SQL.Lexer do
     end
   end
 
-  # for {size, values} <- tl(Unicode.Set.to_pattern!("[[:Lu:], [:Ll:], [:Lt:], [:Lm:], [:Lo:], [:Nl:]]")) |> Enum.group_by(&byte_size/1), into: %{} do
-  #   case size do
-  #     1 -> {size, Enum.map(values, fn <<b>> -> b end)}
-  #     2 -> {size, Enum.group_by(Enum.map(values, fn <<a, b>> -> [a, b] end), &hd/1, &tl/1) |> Map.new(fn {k, v} ->
-  #     [f|v] = List.flatten(v)
-  #     {range, acc} = Enum.reduce(v, {{f, f}, []}, fn x, {{f, l}, acc} -> if l+1 == x, do: {{f, x}, acc}, else: {{x, x}, [{f, l}|acc]} end)
-  #     {k, [range|acc]}
-  #     end)}
-  #     3 -> {size, Enum.group_by(Enum.map(values, fn <<a, b, c>> -> [a, b, c] end), &hd/1, &tl/1) |> Map.new(fn {k, v} ->
-  #     v = Map.new(Enum.group_by(v, &hd/1, &tl/1), fn {k, v} ->
-  #     [f|v] = List.flatten(v)
-  #     {range, acc} = Enum.reduce(v, {{f, f}, []}, fn x, {{f, l}, acc} -> if l+1 == x, do: {{f, x}, acc}, else: {{x, x}, [{f, l}|acc]} end)
-  #     {k, [range|acc]}
-  #     end)
-  #     {k, v}
-  #     end)}
-  #     4 -> {size, Enum.group_by(Enum.map(values, fn <<a, b, c, d>> -> [a, b, c, d] end), &hd/1, &tl/1) |> Map.new(fn {k, v} -> {k, Enum.group_by(v, &hd/1, &tl/1) |> Map.new(fn {k, v} ->
-  #     {k,
-  #     Enum.group_by(v, &hd/1, &tl/1)
-  #     |> Map.new(fn {k, v} ->
-  #       [f|v] = List.flatten(v)
-  #       {range, acc} = Enum.reduce(v, {{f, f}, []}, fn x, {{f, l}, acc} -> if l+1 == x, do: {{f, x}, acc}, else: {{x, x}, [{f, l}|acc]} end)
-  #       {k, [range|acc]}
-  #     end)
-  #     }
-  #     end)} end)}
-  #   end
-  # end
-  # 1509 + 11955 + 29
-
   defp lex(rest, context, line, column, ol, oc, acc) do
     case rest do
       <<226, 129, 166, _::binary>> -> {:error, :bidi, line, column}
