@@ -219,24 +219,27 @@ defmodule SQL do
     end
   end
 
+  @error IO.ANSI.red()
+  @reset IO.ANSI.reset()
+
   @doc false
   def __inspect__(tokens, context, stack) do
-    inspect = IO.iodata_to_binary(["\e[0m", "~SQL\"\"\""|[SQL.Format.to_iodata(tokens, context)|~c"\n\"\"\""]])
+    inspect = IO.iodata_to_binary([@reset, "~SQL\"\"\""|[SQL.Format.to_iodata(tokens, context)|~c"\n\"\"\""]])
     case context.errors do
       [] -> inspect
       errors ->
         {:current_stacktrace, [_|t]} = Process.info(self(), :current_stacktrace)
-        IO.warn([?\n,format_error(errors), IO.iodata_to_binary(["\e[0m", "  ~SQL\"\"\""|[SQL.Format.to_iodata(tokens, context, 1)|~c"\n  \"\"\""]])], [stack|t])
+        IO.warn([?\n,format_error(errors), IO.iodata_to_binary([@reset, "  ~SQL\"\"\""|[SQL.Format.to_iodata(tokens, context, 1)|~c"\n  \"\"\""]])], [stack|t])
         inspect
     end
   end
 
   @doc false
   def format_error(errors), do: Enum.group_by(errors, &elem(&1, 2)) |> Enum.reduce([], fn
-    {k, [{:special, _, _}]}, acc -> [acc|["  the operator \e[31m",k,"\e[0m is invalid, did you mean any of #{__suggest__(k)}\n"]]
-    {k, [{:special, _, _}|_]=v}, acc -> [acc|["  the operator \e[31m",k,"\e[0m is mentioned #{length(v)} times but is invalid, did you mean any of #{__suggest__(k)}\n"]]
-    {k, [_]}, acc -> [acc|["  the relation \e[31m",k,"\e[0m does not exist\n"]]
-    {k, v}, acc -> [acc|["  the relation \e[31m",k,"\e[0m is mentioned #{length(v)} times but does not exist\n"]]
+    {k, [{:special, _, _}]}, acc -> [acc|["  the operator", @error,k,@reset, " is invalid, did you mean any of #{__suggest__(k)}\n"]]
+    {k, [{:special, _, _}|_]=v}, acc -> [acc|["  the operator ",@error,k,@reset," is mentioned #{length(v)} times but is invalid, did you mean any of #{__suggest__(k)}\n"]]
+    {k, [_]}, acc -> [acc|["  the relation ",@error,k,@reset," does not exist\n"]]
+    {k, v}, acc -> [acc|["  the relation ",@error,k,@reset," is mentioned #{length(v)} times but does not exist\n"]]
   end)
 
   @doc false
