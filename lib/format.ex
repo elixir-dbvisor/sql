@@ -19,8 +19,10 @@ defmodule SQL.Format do
 
   defp indention(acc, [{_, {_,_,_,_,_,0}}|_], _), do: acc
   defp indention(acc, [{_, {_,_,_,_,_,0,_,_}}|_], _), do: acc
+  defp indention(acc, [{_, {_,_,_,_,_,_}}|_], 0), do: [?\s|acc]
+  defp indention(acc, [{_, {_,_,_,_,_,_,_,_}}|_], 0), do: [?\s|acc]
   defp indention(acc, 0, 0), do: acc
-  defp indention(acc, _, 0), do: [?\s|acc]
+  defp indention(acc, _, 0), do: acc
   defp indention(acc, _, 1), do: [?\s,?\s|acc]
   defp indention(acc, m, indent), do: indention([?\s,?\s|acc], m, indent-1)
 
@@ -41,10 +43,10 @@ defmodule SQL.Format do
   end
   for atom <- newline do
     defp to_iodata({unquote(atom), _m, values}, binding, :lower=case, errors, indent, acc) do
-      newline([@keyword, unquote("#{atom}"), @reset|newline(to_iodata(values, binding, case, errors, indent, acc), indent)], indent)
+      newline([@keyword, unquote("#{atom}"), @reset|pad(to_iodata(values, binding, case, errors, indent+1, acc))], indent)
     end
     defp to_iodata({unquote(atom), _m, values}, binding, :upper=case, errors, indent, acc) do
-      newline([@keyword, unquote(String.upcase("#{atom}")), @reset|newline(to_iodata(values, binding, case, errors, indent, acc), indent)], indent)
+      newline([@keyword, unquote(String.upcase("#{atom}")), @reset|pad(to_iodata(values, binding, case, errors, indent+1, acc))], indent)
     end
   end
   for atom <- ~w[group order]a do
@@ -61,8 +63,8 @@ defmodule SQL.Format do
   defp to_iodata(:comma, _binding, _case, _errors, 0, acc) do
     [?,|acc]
   end
-  defp to_iodata(:comma, _binding, _case, _errors, indent, acc) do
-    [?,|newline(acc, indent)]
+  defp to_iodata(:comma, _binding, _case, _errors, _indent, acc) do
+    [?,|pad(acc)]
   end
   defp to_iodata(:dot, _binding, _case, _errors, _indent, acc) do
     [?.|acc]

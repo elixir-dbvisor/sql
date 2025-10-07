@@ -61,7 +61,7 @@ iex(6)> inspect(sql)
   [%User{id: 1, email: "john@example.com"}, %User{id: 2, email: "jane@example.com"}]
 ```
 
-## Compile time errors
+## Compile time warning
 run `mix sql.get` to generate your `sql.lock` file which is used for error reporting.
 
 ```elixir

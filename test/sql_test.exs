@@ -47,7 +47,7 @@ defmodule SQLTest do
 
 
   test "inspect/1" do
-    assert ~s(\e[0m~SQL\"\"\"\n\e[35mselect\e[0m\n \e[35m+\e[0m\e[33m1000\e[0m\n\"\"\") == inspect(~SQL[select +1000])
+    assert ~s(\e[0m~SQL\"\"\"\n\e[35mselect\e[0m\n  \e[35m+\e[0m\e[33m1000\e[0m\n\"\"\") == inspect(~SQL[select +1000])
   end
 
   test "to_sql/1" do
