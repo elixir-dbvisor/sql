@@ -13,7 +13,7 @@ defmodule SQL.MixFormatter do
     opts = Map.new(Keyword.merge([validate: nil], opts))
     {:ok, context, tokens} = SQL.Lexer.lex(source)
     {:ok, context, tokens} = SQL.Parser.parse(tokens, Map.merge(context, opts))
-    if context.errors != [], do: IO.warn([?\n,SQL.format_error(context.errors),"  \n  ",SQL.Format.to_iodata(tokens, context, 1),?\n])
-    IO.iodata_to_binary(SQL.Format.to_iodata(tokens, context))
+    if context.errors != [], do: IO.warn([?\n,SQL.format_error(context.errors),"  \n  ",SQL.Format.to_iodata(tokens, context, 1, true),?\n])
+    IO.iodata_to_binary(SQL.Format.to_iodata(tokens, context, 0, false))
   end
 end

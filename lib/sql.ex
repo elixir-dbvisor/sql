@@ -224,12 +224,12 @@ defmodule SQL do
 
   @doc false
   def __inspect__(tokens, context, stack) do
-    inspect = IO.iodata_to_binary([@reset, "~SQL\"\"\""|[SQL.Format.to_iodata(tokens, context)|~c"\n\"\"\""]])
+    inspect = IO.iodata_to_binary([@reset, "~SQL\"\"\""|[SQL.Format.to_iodata(tokens, context, 0, true)|~c"\n\"\"\""]])
     case context.errors do
       [] -> inspect
       errors ->
         {:current_stacktrace, [_|t]} = Process.info(self(), :current_stacktrace)
-        IO.warn([?\n,format_error(errors), IO.iodata_to_binary([@reset, "  ~SQL\"\"\""|[SQL.Format.to_iodata(tokens, context, 1)|~c"\n  \"\"\""]])], [stack|t])
+        IO.warn([?\n,format_error(errors), IO.iodata_to_binary([@reset, "  ~SQL\"\"\""|[SQL.Format.to_iodata(tokens, context, 1, true)|~c"\n  \"\"\""]])], [stack|t])
         inspect
     end
   end
