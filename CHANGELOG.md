@@ -5,6 +5,11 @@
 
 # Changelog
 
+## v0.5.0 (2025-XX-XX)
+
+### Enhancement
+
+
 ## v0.4.0 (2025-10-18)
 
 ### Enhancement
