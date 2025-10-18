@@ -14,15 +14,15 @@ defmodule SQL.Pool do
     {:ok, initialize(state)}
   end
 
-  def checkout(%{id: id}=sql, pool \\ :default) do
-    start_time = System.monotonic_time()
+  def checkout(%{id: _id}=sql, pool \\ :default) do
+    # start_time = System.monotonic_time()
     scheduler_id = :erlang.system_info(:scheduler_id)
     state = :persistent_term.get({__MODULE__, pool})
     {_size, connections, activations, recent_activations, sockets, schedulers, _indexes, _health} = state
     {n, workers} = Map.get(schedulers, scheduler_id)
     case checkout(state, n, workers) do
       :none=error ->
-        :telemetry.execute([:sql, :checkout], %{pool: pool, duration: System.monotonic_time()-start_time}, %{id: id})
+        # :telemetry.execute([:sql, :checkout], %{pool: pool, duration: System.monotonic_time()-start_time}, %{id: id})
         error
       {idx, _load} ->
         case :atomics.compare_exchange(connections, idx, 0, 1) do
@@ -30,7 +30,7 @@ defmodule SQL.Pool do
             :counters.add(activations, idx, 1)
             :counters.add(recent_activations, idx, 1)
             result = {idx, elem(sockets, idx-1)}
-            :telemetry.execute([:sql, :checkout], %{pool: pool, duration: System.monotonic_time()-start_time}, %{id: id})
+            # :telemetry.execute([:sql, :checkout], %{pool: pool, duration: System.monotonic_time()-start_time}, %{id: id})
             result
           _ ->
             checkout(sql, pool)
