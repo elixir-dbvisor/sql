@@ -16,7 +16,7 @@ defmodule SQL.MixProject do
       name: "SQL",
       docs: docs(),
       package: package(),
-      aliases: ["sql.bench": "run benchmarks/bench.exs", "sql.bench.pool": "run benchmarks/pool.exs"]
+      aliases: ["sql.bench": "run benchmarks/bench.exs", "sql.bench.pool": "run benchmarks/pool.exs benchee", "sql.bench.pool.deterministic": "run benchmarks/pool.exs", "sql.bench.pool.realistic": "run benchmarks/pool.exs realistic"]
     ]
   end
 
