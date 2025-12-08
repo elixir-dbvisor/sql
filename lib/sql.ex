@@ -16,8 +16,8 @@ defmodule SQL do
       config = Map.new(Keyword.merge([case: :lower, adapter: Application.compile_env(:sql, :adapter, ANSI), validate: fn _, _ -> true end],  opts))
       @external_resource Path.relative_to_cwd("sql.lock")
       config = with true <- File.exists?(Path.relative_to_cwd("sql.lock")),
-                    %{validate: validate, columns: _columns} <- elem(Code.eval_file("sql.lock", File.cwd!()), 0) do
-                    %{config | validate: validate}
+                    %{validate: validate, columns: columns} <- elem(Code.eval_file("sql.lock", File.cwd!()), 0) do
+                    %{config | validate: validate, columns: columns}
                else
                 _ -> config
                end
@@ -26,7 +26,7 @@ defmodule SQL do
     end
   end
 
-  defstruct [tokens: [], idx: 0, params: [], module: nil, id: nil, string: nil, inspect: nil, fn: nil, context: nil]
+  defstruct [tokens: [], idx: 0, params: [], module: nil, id: nil, string: nil, inspect: nil, fn: nil, context: nil, name: nil, columns: [], c_len: 0, types: [], pool: :default]
 
   defimpl Inspect, for: SQL do
     def inspect(%{inspect: nil, tokens: tokens, context: context}, _opts) do
@@ -89,12 +89,65 @@ defmodule SQL do
     SQL.build(left, right, __CALLER__)
   end
 
+  @doc """
+  Perform a transaction.
+
+  ## Examples
+      iex(1)> SQL.transaction(fn -> Enum.list(~SQL"from users select id, email") end)
+  """
+  @doc since: "0.5.0"
+  defmacro transaction(do: block) do
+    quote bind_quoted: [testing: Mix.env() == :test, block: Macro.escape(block), key: __CALLER__.function, id: "sp_#{:erlang.unique_integer([:positive])}"] do
+      ref = make_ref()
+      state = if testing, do: :persistent_term.get(key, Process.get(SQL.Transaction)), else: Process.get(SQL.Transaction)
+      case state do
+        nil ->
+          conn = elem(:persistent_term.get(:default), :erlang.system_info(:scheduler_id)-1)
+          owner = self()
+          state = {owner, conn}
+          Process.put(SQL.Transaction, state)
+          if testing, do: :persistent_term.put(key, state)
+          send conn, {:begin, ref, owner}
+          receive do
+            {^ref, :begin} -> :ok
+          end
+          try do
+            result = block
+            send conn, {:commit, ref, owner}
+            Process.delete(SQL.Transaction)
+            result
+          rescue
+            e ->
+              send conn, {:rollback, ref, owner}
+              {:error, e}
+          end
+        {owner, conn} = state ->
+          if testing, do: Process.put(SQL.Transaction, state)
+          send conn, {:begin, ref, id, owner}
+          receive do
+            {^ref, :begin} -> :ok
+          end
+          try do
+            result = block
+            send conn, {:commit, ref, id, owner}
+            result
+          rescue
+            e ->
+            send conn, {:rollback, ref, id, owner}
+            {:error, e}
+          end
+      end
+    end
+  end
+
   @doc false
   @doc since: "0.1.0"
   def parse(binary, params \\ [], module \\ ANSI) do
     {:ok, context, tokens} = SQL.Lexer.lex(binary)
     {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
-    struct(SQL, tokens: tokens, context: context, string: IO.iodata_to_binary(module.to_iodata(tokens, context)), params: params)
+    columns = plan_row_description(tokens, [])
+    id = :erlang.phash2(tokens)
+    struct(SQL, id: id, name: "sql_#{id}", tokens: tokens, context: context, string: IO.iodata_to_binary(module.to_iodata(tokens, context)), params: params, columns: columns, c_len: length(columns))
   end
 
   @doc false
@@ -113,9 +166,10 @@ defmodule SQL do
         {:ok, context, tokens} = SQL.Lexer.lex(data, env.file)
         %{context|validate: config.validate, module: config.adapter, case: config.case}
         {:ok, context, tokens} = SQL.Parser.parse(tokens, %{context|validate: config.validate, module: config.adapter, case: config.case})
+        columns = plan_row_description(tokens, config[:columns] || [])
         string = IO.iodata_to_binary(context.module.to_iodata(tokens, context))
         inspect = __inspect__(tokens, context, stack)
-        sql = %{sql | idx: context.idx, tokens: tokens, string: string, inspect: inspect, id: id}
+        sql = %{sql | name: "sql_#{id}", idx: context.idx, tokens: tokens, string: string, inspect: inspect, id: id, columns: columns, c_len: length(columns)}
         case context.binding do
           []     -> Macro.escape(sql)
           params ->
@@ -125,7 +179,8 @@ defmodule SQL do
         end
 
       {:dynamic, data} ->
-        sql = %{sql | id: id(data)}
+        id = id(data)
+        sql = %{sql | id: id, name: "sql_#{id}"}
         quote bind_quoted: [left: Macro.unpipe(left), right: right, file: env.file, data: data, sql: Macro.escape(sql), env: Macro.escape(env), config: Macro.escape(%{config| validate: nil}), stack: Macro.escape(stack)] do
           {t,p,idx} = Enum.reduce(left, {[], [], 0}, fn
             {[], 0}, acc        -> acc
@@ -133,8 +188,9 @@ defmodule SQL do
             end)
           {:ok, context, tokens} = tokens(right, file, idx, sql.id)
           tokens = t++tokens
+          columns = plan_row_description(tokens, config[:columns] || [])
           {string, inspect} = plan(tokens, %{context|validate: config.validate, module: config.adapter, format: :dynamic}, sql.id, stack)
-          %{sql | params: p++cast_params(context.binding, binding(), env, []), tokens: tokens, string: string, inspect: inspect}
+          %{sql | params: p++cast_params(context.binding, binding(), env, []), tokens: tokens, string: string, inspect: inspect, columns: columns, c_len: length(columns)}
         end
     end
   end
@@ -219,6 +275,25 @@ defmodule SQL do
     end
   end
 
+  def plan_row_description(tokens, columns) do
+    from = for col <- elem(Enum.find(tokens, {[],[],[]}, &(elem(&1, 0) == :from)), 2), do: col
+    for col <- elem(Enum.find(tokens, {[], [], []}, &(elem(&1, 0) == :select)), 2), do: description_column(col, from, columns)
+  end
+
+  defp description_column({:*,_,_}, _from, columns), do: columns
+  defp description_column({:as, _, [{type, _, _}, {_, _, col}]}, _from, _columns), do: {type, col}
+  defp description_column({:numeric=type, _, _}, _from, _columns), do: {type, nil}
+  defp description_column({:+, _, _}, _from, _columns), do: {:numeric, nil}
+  defp description_column({:-, _, _}, _from, _columns), do: {:numeric, nil}
+  defp description_column({:avg, _, _}, _from, _columns), do: {:numeric, nil}
+  defp description_column({:comma, _, [col]}, from, columns), do: description_column(col, from, columns)
+  defp description_column({:"::", _, [_col, {_, _, type}]}, _from, _columns), do: {type, nil}
+  defp description_column({:ident=type, _, col}, _from, _columns), do: {type, col}
+  defp description_column(_, _from, _columns), do: {:any, nil}
+  # defp description_column(col, from, columns) do
+  #   raise {col, from, columns}
+  # end
+
   @error IO.ANSI.red()
   @reset IO.ANSI.reset()
 
@@ -242,33 +317,49 @@ defmodule SQL do
     {k, v}, acc -> [acc|["  the relation ",@error,k,@reset," is mentioned #{length(v)} times but does not exist\n"]]
   end)
 
+  def reduce(%SQL{fn: nil} = sql, acc, fun) do
+    reduce(%{sql | fn: fn row, acc -> fun.(row, acc) end}, acc)
+  end
+  def reduce(sql, acc, fun) do
+    reduce(%{sql | fn: fn row, acc -> fun.(sql.fn.(row), acc) end}, acc)
+  end
+  defp reduce(sql, acc) do
+    ref = make_ref()
+    case Process.get(SQL.Transaction) do
+      nil ->
+        send(elem(:persistent_term.get(sql.pool), :erlang.system_info(:scheduler_id)-1), {ref, self(), sql})
+      {owner, conn} ->
+        send(conn, {ref, owner, self(), sql})
+    end
+    receive do
+      {^ref, {_, rows}} ->
+        Enumerable.reduce(rows, acc, sql.fn)
+    end
+  end
+
+  def count(sql) do
+    count(sql, make_ref())
+  end
+  defp count(sql, ref) do
+    # We can optimize this, by not decoding every row being sent over by the driver and just retrieve it
+    # from the complete message.
+    case Process.get(SQL.Transaction) do
+      nil           -> send(elem(:persistent_term.get(sql.pool), :erlang.system_info(:scheduler_id)-1), {ref, self(), sql})
+      {owner, conn} -> send(conn, {ref, owner, self(), sql})
+    end
+    receive do
+      {^ref, {count, _rows}} -> count
+    end
+  end
+
+
   @doc false
   def __suggest__(k), do: Enum.join(SQL.Lexer.suggest_operator(:erlang.iolist_to_binary(k)), ", ")
 
   defimpl Enumerable, for: SQL do
-    def count(_enumerable) do
-      {:error, __MODULE__}
-    end
-    def member?(_enumerable, _element) do
-      {:error, __MODULE__}
-    end
-    def reduce(%SQL{fn: nil} = enumerable, acc, fun) do
-      repo = enumerable.module.sql_repo()
-      %{rows: rows, columns: columns} = repo.query!(enumerable.string, enumerable.params)
-      Enumerable.reduce(rows, acc, fn row, acc -> fun.(Map.new(Enum.zip(columns, row)), acc) end)
-    end
-    def reduce(%SQL{} = enumerable, acc, fun) do
-      repo = enumerable.module.sql_repo()
-      %{rows: rows, columns: columns} = repo.query!(enumerable.string, enumerable.params)
-      fun = case Function.info(enumerable.fn, :arity) do
-              {:arity, 1} -> fn row, acc -> fun.(enumerable.fn.(row), acc) end
-              {:arity, 2} -> fn row, acc -> fun.(enumerable.fn.(row, columns), acc) end
-              {:arity, 3} -> fn row, acc -> fun.(enumerable.fn.(row, columns, repo), acc) end
-            end
-      Enumerable.reduce(rows, acc, fun)
-    end
-    def slice(_enumerable) do
-      {:error, __MODULE__}
-    end
+    def count(enumerable), do: SQL.count(enumerable)
+    def member?(_enumerable, _element), do: {:error, __MODULE__}
+    def reduce(enumerable, acc, fun), do: SQL.reduce(enumerable, acc, fun)
+    def slice(_enumerable), do: {:error, __MODULE__}
   end
 end

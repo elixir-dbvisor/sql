@@ -2,8 +2,13 @@
 # SPDX-FileCopyrightText: 2025 DBVisor
 
 defmodule SQL.Adapters.PostgresTest do
-  use ExUnit.Case, async: true
+  use SQL.Case, async: true
   use SQL, adapter: SQL.Adapters.Postgres
+
+  setup_all do
+    {:ok, _pid} = SQL.Pool.start_link(%{username: "postgres", password: "postgres", hostname: "localhost", database: "sql_test#{System.get_env("MIX_TEST_PARTITION")}", adapter: SQL.Adapters.Postgres, ssl: false})
+    :ok
+  end
 
   describe "with" do
     test "recursive" do
