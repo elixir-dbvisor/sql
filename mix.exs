@@ -45,12 +45,12 @@ defmodule SQL.MixProject do
   defp deps do
     [
       {:benchee, "~> 1.3", only: :dev},
-      {:ecto_sql, "~> 3.12", only: [:dev, :test]},
+      {:ecto_sql, "~> 3.12", only: :dev},
       {:ex_doc, "~> 0.37", only: :dev},
-      {:postgrex, ">= 0.0.0", only: [:dev, :test]},
-      {:tds, ">= 0.0.0", only: [:dev, :test]},
-      {:myxql, ">= 0.0.0", only: [:dev, :test]},
-      {:yamerl, ">= 0.0.0", only: [:dev, :test]},
+      {:postgrex, ">= 0.0.0", only: :dev},
+      {:tds, ">= 0.0.0", only: :dev},
+      {:myxql, ">= 0.0.0", only: :dev},
+      {:yamerl, ">= 0.0.0", only: :dev},
       {:unicode_set, "~> 1.0"}
     ]
   end
