@@ -5,11 +5,6 @@ defmodule SQL.Adapters.PostgresTest do
   use SQL.Case, async: true
   use SQL, adapter: SQL.Adapters.Postgres
 
-  setup_all do
-    {:ok, _pid} = SQL.Pool.start_link(%{username: "postgres", password: "postgres", hostname: "localhost", database: "sql_test#{System.get_env("MIX_TEST_PARTITION")}", adapter: SQL.Adapters.Postgres, ssl: false})
-    :ok
-  end
-
   describe "with" do
     test "recursive" do
       assert "with recursive temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)" == to_string(~SQL[with recursive temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)])

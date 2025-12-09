@@ -11,6 +11,7 @@ defmodule SQL.MixProject do
       app: :sql,
       version: @version,
       elixir: "~> 1.19",
+      start_permanent: Mix.env() == :prod,
       deps: deps(),
       description: "Brings an extensible SQL parser and sigil to Elixir, confidently write SQL with automatic parameterized queries.",
       name: "SQL",
@@ -18,6 +19,12 @@ defmodule SQL.MixProject do
       package: package(),
       elixirc_paths: elixirc_paths(Mix.env()),
       aliases: ["sql.bench": "run benchmarks/bench.exs"]
+    ]
+  end
+
+  def application do
+    [
+      mod: {SQL.Application, []}
     ]
   end
 
@@ -50,7 +57,7 @@ defmodule SQL.MixProject do
       {:postgrex, ">= 0.0.0", only: :dev},
       {:tds, ">= 0.0.0", only: :dev},
       {:myxql, ">= 0.0.0", only: :dev},
-      {:yamerl, ">= 0.0.0", only: :dev},
+      {:yamerl, ">= 0.0.0", only: [:dev, :test]},
       {:unicode_set, "~> 1.0"}
     ]
   end

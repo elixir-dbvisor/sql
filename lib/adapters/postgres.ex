@@ -16,7 +16,7 @@ defmodule SQL.Adapters.Postgres do
   @execute <<?E,9::32,0,0::32-big>>
 
   def start(state) do
-    spawn(fn -> init(state) end)
+    {:ok, spawn(fn -> init(state) end)}
   end
 
   defp to_iodata({:in, m, [{:not, _, left}, {:binding, _, [idx]}]}, format, case, acc) do
@@ -38,7 +38,7 @@ defmodule SQL.Adapters.Postgres do
     :socket.connect(socket, Map.take(state, [:family, :port, :addr]), handle)
     receive do
       {:"$socket", ^socket, :select, ^handle} ->
-        :ok = :socket.connect(socket)
+        :socket.connect(socket)
         :socket.recv(socket, 0, [], handle)
         state
         |> Map.put(:socket, socket)
@@ -95,7 +95,7 @@ defmodule SQL.Adapters.Postgres do
       {:ssl_error, ^socket, reason} ->
         raise reason
       after
-        0 ->
+        5 ->
           case owner do
             nil ->
               case :queue.out(queue) do

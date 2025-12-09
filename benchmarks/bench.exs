@@ -8,26 +8,25 @@ defmodule SQL.Repo do
   use SQL, adapter: SQL.Adapters.Postgres
   import Ecto.Query
   def sql() do
-    # SQL.transaction do
-    #   SQL.transaction do
+    SQL.transaction do
+      SQL.transaction do
         Enum.to_list(~SQL"SELECT 1")
-    #   end
-    # end
+      end
+    end
   end
 
   def ecto() do
-    # SQL.Repo.transaction(fn ->
-    #   SQL.Repo.transaction(fn ->
+    SQL.Repo.transaction(fn ->
+      SQL.Repo.transaction(fn ->
         SQL.Repo.all(select(from("users"), [1]))
-    #   end)
-    # end)
+      end)
+    end)
   end
 end
 Application.put_env(:sql, :ecto_repos, [SQL.Repo])
-Application.put_env(:sql, SQL.Repo, log: false, username: "postgres", password: "postgres", hostname: "localhost", database: "sql_test#{System.get_env("MIX_TEST_PARTITION")}", pool_size: 10, ssl: false)
+Application.put_env(:sql, SQL.Repo, log: false, username: "postgres", password: "postgres", hostname: "localhost", database: "sql_test#{System.get_env("MIX_TEST_PARTITION")}", pool_size: :erlang.system_info(:schedulers_online), ssl: false)
 SQL.Repo.__adapter__().storage_up(SQL.Repo.config())
 SQL.Repo.start_link()
-SQL.Pool.start_link(%{username: "postgres", password: "postgres", hostname: "localhost", database: "sql_test#{System.get_env("MIX_TEST_PARTITION")}", adapter: SQL.Adapters.Postgres, ssl: false})
 # query = "temp" |> recursive_ctes(true) |> with_cte("temp", as: ^union_all(select("temp", [t], %{n: 0, fact: 1}), ^where(select("temp", [t], [t.n+1, t.n+1*t.fact]), [t], t.n < 9))) |> select([t], [t.n])
 # sql = ~SQL[with recursive temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)]
 # result = Tuple.to_list(SQL.Lexer.lex("with recursive temp (n, fact) as (select 0, 1 union all select n+1, (n+1)*fact from temp where n < 9)"))
@@ -58,7 +57,7 @@ Benchee.run(
   # "runtime ecto" => fn _ -> SQL.Repo.to_sql(:all, "temp" |> recursive_ctes(true) |> with_cte("temp", as: ^union_all(select("temp", [t], %{n: 0, fact: 1}), ^where(select("temp", [t], [t.n+1, t.n+1*t.fact]), [t], t.n < 9))) |> select([t], [t.n])) end,
   # "comptime ecto" => fn _ -> SQL.Repo.to_sql(:all, query) end
   },
-  parallel: 50,
+  parallel: 1,
   memory_time: 2,
   reduction_time: 2,
   unit_scaling: :smallest,
