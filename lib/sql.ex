@@ -26,7 +26,7 @@ defmodule SQL do
     end
   end
 
-  defstruct [tokens: [], idx: 0, params: [], module: nil, id: nil, string: nil, inspect: nil, fn: nil, context: nil, name: nil, columns: [], c_len: 0, types: [], pool: :default]
+  defstruct [tokens: [], idx: 0, params: [], module: nil, id: nil, string: nil, inspect: nil, fn: nil, context: nil, name: nil, columns: [], c_len: 0, types: [], pool: :default, max_rows: 500, portal: nil, p_len: 0]
 
   defimpl Inspect, for: SQL do
     def inspect(%{inspect: nil, tokens: tokens, context: context}, _opts) do
@@ -92,49 +92,56 @@ defmodule SQL do
   @doc """
   Perform a transaction.
 
-  ## Examples
-      iex(1)> SQL.transaction(fn -> Enum.list(~SQL"from users select id, email") end)
+  ## Examples"""
+      iex(1)> SQL.transaction, do: Enum.list(~SQL"from users select id, email")
   """
   @doc since: "0.5.0"
   defmacro transaction(do: block) do
-    quote bind_quoted: [testing: Mix.env() == :test, block: Macro.escape(block), key: __CALLER__.function, id: "sp_#{:erlang.unique_integer([:positive])}"] do
+    key = __CALLER__.function
+    testing = Mix.env() == :test
+    id = "sp_#{:erlang.unique_integer([:positive])}"
+    savepoint = Macro.escape(parse("savepoint #{id}"))
+    release = Macro.escape(parse("release savepoint #{id}"))
+    rollback = Macro.escape(parse("rollback to savepoint #{id}"))
+    quote do
       ref = make_ref()
-      state = if testing, do: :persistent_term.get(key, Process.get(SQL.Transaction)), else: Process.get(SQL.Transaction)
+      state = if unquote(testing), do: :persistent_term.get(unquote(key), Process.get(SQL.Transaction)), else: Process.get(SQL.Transaction)
       case state do
         nil ->
-          conn = elem(:persistent_term.get(:default), :erlang.system_info(:scheduler_id)-1)
           owner = self()
+          conn = conn(:default)
           state = {owner, conn}
           Process.put(SQL.Transaction, state)
-          if testing, do: :persistent_term.put(key, state)
-          send conn, {:begin, ref, owner}
+          if unquote(testing), do: :persistent_term.put(unquote(key), state)
+          send conn, {ref, owner, ~SQL[begin]}
           receive do
-            {^ref, :begin} -> :ok
-          end
-          try do
-            result = block
-            send conn, {:commit, ref, owner}
-            Process.delete(SQL.Transaction)
-            result
-          rescue
-            e ->
-              send conn, {:rollback, ref, owner}
-              {:error, e}
+            {^ref, :begin} ->
+              try do
+                result = unquote(block)
+                send conn, {ref, owner, ~SQL[commit]}
+                Process.delete(SQL.Transaction)
+                result
+              rescue
+                e ->
+                  send conn, {ref, owner, ~SQL[rollback]}
+                  Process.delete(SQL.Transaction)
+                  {:error, e}
+              end
           end
         {owner, conn} = state ->
-          if testing, do: Process.put(SQL.Transaction, state)
-          send conn, {:begin, ref, id, owner}
+          if unquote(testing), do: Process.put(SQL.Transaction, state)
+          send conn, {ref, owner, unquote(savepoint)}
           receive do
-            {^ref, :begin} -> :ok
-          end
-          try do
-            result = block
-            send conn, {:commit, ref, id, owner}
-            result
-          rescue
-            e ->
-            send conn, {:rollback, ref, id, owner}
-            {:error, e}
+            {^ref, :begin} ->
+              try do
+                result = unquote(block)
+                send conn, {ref, owner, unquote(release)}
+                result
+              rescue
+                e ->
+                send conn, {ref, owner, unquote(rollback)}
+                {:error, e}
+              end
           end
       end
     end
@@ -147,7 +154,8 @@ defmodule SQL do
     {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
     columns = plan_row_description(tokens, [])
     id = :erlang.phash2(tokens)
-    struct(SQL, id: id, name: "sql_#{id}", tokens: tokens, context: context, string: IO.iodata_to_binary(module.to_iodata(tokens, context)), params: params, columns: columns, c_len: length(columns))
+    portal = "p_#{:erlang.unique_integer([:positive])}"
+    struct(SQL, id: id, name: "sql_#{id}", tokens: tokens, context: context, string: IO.iodata_to_binary(module.to_iodata(tokens, context)), params: params, columns: columns, c_len: length(columns), portal: portal, p_len: byte_size(portal))
   end
 
   @doc false
@@ -169,12 +177,21 @@ defmodule SQL do
         columns = plan_row_description(tokens, config[:columns] || [])
         string = IO.iodata_to_binary(context.module.to_iodata(tokens, context))
         inspect = __inspect__(tokens, context, stack)
-        sql = %{sql | name: "sql_#{id}", idx: context.idx, tokens: tokens, string: string, inspect: inspect, id: id, columns: columns, c_len: length(columns)}
+        portal = "p_#{:erlang.unique_integer([:positive])}"
+
+        sql = %{sql | name: "sql_#{id}", idx: context.idx, tokens: tokens, string: string, inspect: inspect, id: id, columns: columns, c_len: length(columns), portal: portal, p_len: byte_size(portal)}
         case context.binding do
-          []     -> Macro.escape(sql)
+          []     ->
+            Macro.escape(sql)
+            # quote bind_quoted: [sql: Macro.escape(sql)] do
+            #   portal = "p_#{:erlang.unique_integer([:positive])}"
+            #   %{sql | portal: portal, p_len: byte_size(portal)}
+            # end
+
           params ->
             quote bind_quoted: [params: params, sql: Macro.escape(sql), env: Macro.escape(env)] do
-              %{sql | params: cast_params(params, binding(), env, [])}
+              portal = "p_#{:erlang.unique_integer([:positive])}"
+              %{sql | params: cast_params(params, binding(), env, []), portal: portal, p_len: byte_size(portal)}
             end
         end
 
@@ -190,7 +207,8 @@ defmodule SQL do
           tokens = t++tokens
           columns = plan_row_description(tokens, config[:columns] || [])
           {string, inspect} = plan(tokens, %{context|validate: config.validate, module: config.adapter, format: :dynamic}, sql.id, stack)
-          %{sql | params: p++cast_params(context.binding, binding(), env, []), tokens: tokens, string: string, inspect: inspect, columns: columns, c_len: length(columns)}
+          portal = "p_#{:erlang.unique_integer([:positive])}"
+          %{sql | params: p++cast_params(context.binding, binding(), env, []), tokens: tokens, string: string, inspect: inspect, columns: columns, c_len: length(columns), portal: portal, p_len: byte_size(portal)}
         end
     end
   end
@@ -323,41 +341,44 @@ defmodule SQL do
   def reduce(sql, acc, fun) do
     reduce(%{sql | fn: fn row, acc -> fun.(sql.fn.(row), acc) end}, acc)
   end
-  defp reduce(sql, acc) do
+  defp reduce(sql, _acc) do
     ref = make_ref()
+    self = self()
     case Process.get(SQL.Transaction) do
+      nil -> send(pick(sql.pool), {ref, self, sql})
+      {owner, conn} -> send(conn, {owner, {ref, self, sql}})
+    end
+    recv(ref)
+  end
+
+  defp recv(ref) do
+    receive do
+      {^ref, {:cont, _}} -> recv(ref)
+      {^ref, {:done, _}=msg} -> msg
+      {^ref, {:error, reason}} -> raise reason
+    end
+  end
+
+  def conn(%SQL{pool: pool}), do: pick(pool)
+  def conn(pool), do: pick(pool)
+
+  defp pick(pool) do
+    case Process.get(SQL.Conn) do
       nil ->
-        send(elem(:persistent_term.get(sql.pool), :erlang.system_info(:scheduler_id)-1), {ref, self(), sql})
-      {owner, conn} ->
-        send(conn, {ref, owner, self(), sql})
-    end
-    receive do
-      {^ref, {_, rows}} ->
-        Enumerable.reduce(rows, acc, sql.fn)
-    end
-  end
-
-  def count(sql) do
-    count(sql, make_ref())
-  end
-  defp count(sql, ref) do
-    # We can optimize this, by not decoding every row being sent over by the driver and just retrieve it
-    # from the complete message.
-    case Process.get(SQL.Transaction) do
-      nil           -> send(elem(:persistent_term.get(sql.pool), :erlang.system_info(:scheduler_id)-1), {ref, self(), sql})
-      {owner, conn} -> send(conn, {ref, owner, self(), sql})
-    end
-    receive do
-      {^ref, {count, _rows}} -> count
+        conns = :persistent_term.get(pool)
+        conn = elem(conns, :erlang.phash2({self(), :rand.uniform(1_000_000)}, tuple_size(conns)-1))
+        # conn = elem(conns, :erlang.phash2(self(), tuple_size(conns)-1))
+        Process.put(SQL.Conn, conn)
+        conn
+      conn -> conn
     end
   end
-
 
   @doc false
   def __suggest__(k), do: Enum.join(SQL.Lexer.suggest_operator(:erlang.iolist_to_binary(k)), ", ")
 
   defimpl Enumerable, for: SQL do
-    def count(enumerable), do: SQL.count(enumerable)
+    def count(_enumerable), do: {:error, __MODULE__}
     def member?(_enumerable, _element), do: {:error, __MODULE__}
     def reduce(enumerable, acc, fun), do: SQL.reduce(enumerable, acc, fun)
     def slice(_enumerable), do: {:error, __MODULE__}
