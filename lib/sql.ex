@@ -367,7 +367,6 @@ defmodule SQL do
       nil ->
         conns = :persistent_term.get(pool)
         conn = elem(conns, :erlang.phash2({self(), :rand.uniform(1_000_000)}, tuple_size(conns)-1))
-        # conn = elem(conns, :erlang.phash2(self(), tuple_size(conns)-1))
         Process.put(SQL.Conn, conn)
         conn
       conn -> conn
