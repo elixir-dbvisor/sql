@@ -7,26 +7,38 @@ defmodule SQL do
                |> String.split("<!-- MDOC !-->")
                |> Enum.fetch!(1)
   @moduledoc since: "0.1.0"
+  # require Logger
   alias SQL.Adapters.ANSI
 
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
       @doc false
       import SQL
-      config = Map.new(Keyword.merge([case: :lower, adapter: Application.compile_env(:sql, :adapter, ANSI), validate: fn _, _ -> true end],  opts))
+      config = Map.new(Keyword.merge([case: :lower, columns: [], adapter: Application.compile_env(:sql, :adapter, ANSI), validate: fn _, _ -> true end],  opts))
       @external_resource Path.relative_to_cwd("sql.lock")
       config = with true <- File.exists?(Path.relative_to_cwd("sql.lock")),
                     %{validate: validate, columns: columns} <- elem(Code.eval_file("sql.lock", File.cwd!()), 0) do
                     %{config | validate: validate, columns: columns}
                else
-                _ -> config
+                _ ->
+                  %{validate: validate, columns: columns} = case :persistent_term.get(SQL.Lock, nil) do
+                    nil ->
+                      lock = Mix.Tasks.Sql.Get.gen_template()
+                      :persistent_term.put(SQL.Lock, lock)
+                      lock
+                    lock ->
+                      lock
+                  end
+                  |> Code.eval_string()
+                  |> elem(0)
+                  %{config | columns: columns}
                end
       Module.put_attribute(__MODULE__, :sql_config, config)
-      def sql_repo, do: unquote(opts[:repo] || config.adapter)
+      Module.put_attribute(__MODULE__, :sql_pool, opts[:pool] || :default)
     end
   end
 
-  defstruct [tokens: [], idx: 0, params: [], module: nil, id: nil, string: nil, inspect: nil, fn: nil, context: nil, name: nil, columns: [], c_len: 0, types: [], pool: :default, max_rows: 500, portal: nil, p_len: 0]
+  defstruct [tokens: [], idx: 0, params: [], module: nil, id: nil, string: nil, inspect: nil, fn: nil, context: nil, name: nil, columns: [], c_len: 0, types: [], pool: :default, portal: nil, p_len: 0, timeout: nil]
 
   defimpl Inspect, for: SQL do
     def inspect(%{inspect: nil, tokens: tokens, context: context}, _opts) do
@@ -92,7 +104,7 @@ defmodule SQL do
   @doc """
   Perform a transaction.
 
-  ## Examples"""
+  ## Examples
       iex(1)> SQL.transaction, do: Enum.list(~SQL"from users select id, email")
   """
   @doc since: "0.5.0"
@@ -103,44 +115,50 @@ defmodule SQL do
     savepoint = Macro.escape(parse("savepoint #{id}"))
     release = Macro.escape(parse("release savepoint #{id}"))
     rollback = Macro.escape(parse("rollback to savepoint #{id}"))
+    pool = Module.get_attribute(__CALLER__.module, :sql_pool)
     quote do
       ref = make_ref()
       state = if unquote(testing), do: :persistent_term.get(unquote(key), Process.get(SQL.Transaction)), else: Process.get(SQL.Transaction)
       case state do
         nil ->
           owner = self()
-          conn = conn(:default)
+          conn = conn(unquote(pool))
           state = {owner, conn}
           Process.put(SQL.Transaction, state)
-          if unquote(testing), do: :persistent_term.put(unquote(key), state)
-          send conn, {ref, owner, ~SQL[begin]}
+          if unquote(testing) do
+            :persistent_term.put({SQL.Conn, owner}, state)
+            :persistent_term.put(unquote(key), state)
+          end
+          send conn, {ref, owner, System.monotonic_time(), ~SQL[begin]}
           receive do
             {^ref, :begin} ->
               try do
                 result = unquote(block)
-                send conn, {ref, owner, ~SQL[commit]}
+                send conn, {ref, owner, System.monotonic_time(), ~SQL[commit]}
                 Process.delete(SQL.Transaction)
                 result
               rescue
                 e ->
-                  send conn, {ref, owner, ~SQL[rollback]}
+                  send conn, {ref, owner, System.monotonic_time(), ~SQL[rollback]}
                   Process.delete(SQL.Transaction)
                   {:error, e}
+                  reraise e, __STACKTRACE__
               end
           end
         {owner, conn} = state ->
           if unquote(testing), do: Process.put(SQL.Transaction, state)
-          send conn, {ref, owner, unquote(savepoint)}
+          send conn, {ref, owner, System.monotonic_time(), unquote(savepoint)}
           receive do
             {^ref, :begin} ->
               try do
                 result = unquote(block)
-                send conn, {ref, owner, unquote(release)}
+                send conn, {ref, owner, System.monotonic_time(), unquote(release)}
                 result
               rescue
                 e ->
-                send conn, {ref, owner, unquote(rollback)}
+                send conn, {ref, owner, System.monotonic_time(), unquote(rollback)}
                 {:error, e}
+                reraise e, __STACKTRACE__
               end
           end
       end
@@ -151,11 +169,10 @@ defmodule SQL do
   @doc since: "0.1.0"
   def parse(binary, params \\ [], module \\ ANSI) do
     {:ok, context, tokens} = SQL.Lexer.lex(binary)
-    {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
-    columns = plan_row_description(tokens, [])
+    {:ok, %{description: description} = context, tokens} = SQL.Parser.parse(tokens, context)
     id = :erlang.phash2(tokens)
     portal = "p_#{:erlang.unique_integer([:positive])}"
-    struct(SQL, id: id, name: "sql_#{id}", tokens: tokens, context: context, string: IO.iodata_to_binary(module.to_iodata(tokens, context)), params: params, columns: columns, c_len: length(columns), portal: portal, p_len: byte_size(portal))
+    struct(SQL, id: id, name: "sql_#{id}", tokens: tokens, context: context, string: IO.iodata_to_binary(module.to_iodata(tokens, context)), idx: length(params), types: context.types, params: params, columns: description, c_len: length(description), portal: portal, p_len: byte_size(portal))
   end
 
   @doc false
@@ -173,13 +190,11 @@ defmodule SQL do
         id = id(data)
         {:ok, context, tokens} = SQL.Lexer.lex(data, env.file)
         %{context|validate: config.validate, module: config.adapter, case: config.case}
-        {:ok, context, tokens} = SQL.Parser.parse(tokens, %{context|validate: config.validate, module: config.adapter, case: config.case})
-        columns = plan_row_description(tokens, config[:columns] || [])
+        {:ok, %{description: description}=context, tokens} = SQL.Parser.parse(tokens, %{context|validate: config.validate, module: config.adapter, case: config.case}, config)
         string = IO.iodata_to_binary(context.module.to_iodata(tokens, context))
         inspect = __inspect__(tokens, context, stack)
         portal = "p_#{:erlang.unique_integer([:positive])}"
-
-        sql = %{sql | name: "sql_#{id}", idx: context.idx, tokens: tokens, string: string, inspect: inspect, id: id, columns: columns, c_len: length(columns), portal: portal, p_len: byte_size(portal)}
+        sql = %{sql | name: "sql_#{id}", idx: context.idx, tokens: tokens, string: string, inspect: inspect, id: id, types: context.types, columns: description, c_len: length(description), portal: portal, p_len: byte_size(portal)}
         case context.binding do
           []     ->
             Macro.escape(sql)
@@ -203,12 +218,11 @@ defmodule SQL do
             {[], 0}, acc        -> acc
             {v, 0}, {t, p, idx} -> {t++v.tokens, p++v.params, idx+v.idx}
             end)
-          {:ok, context, tokens} = tokens(right, file, idx, sql.id)
+          {:ok, context, tokens} = tokens(right, file, idx, sql.id, config)
           tokens = t++tokens
-          columns = plan_row_description(tokens, config[:columns] || [])
-          {string, inspect} = plan(tokens, %{context|validate: config.validate, module: config.adapter, format: :dynamic}, sql.id, stack)
+          {%{description: description}=context, string, inspect} = plan(tokens, %{context|validate: config.validate, module: config.adapter, types: context.types, format: :dynamic}, sql.id, stack, config)
           portal = "p_#{:erlang.unique_integer([:positive])}"
-          %{sql | params: p++cast_params(context.binding, binding(), env, []), tokens: tokens, string: string, inspect: inspect, columns: columns, c_len: length(columns), portal: portal, p_len: byte_size(portal)}
+          %{sql | params: p++cast_params(context.binding, binding(), env, []), tokens: tokens, string: string, inspect: inspect, columns: description, c_len: length(description), portal: portal, p_len: byte_size(portal)}
         end
     end
   end
@@ -265,7 +279,7 @@ defmodule SQL do
   def cast_params([q|params], binding, env, acc), do: cast_params(params, binding, env, [q|acc])
 
   @doc false
-  def tokens(binary, file, count, id) do
+  def tokens(binary, file, count, id, _config) do
     key = {id, :lex}
     case :persistent_term.get(key, nil)  do
       nil ->
@@ -279,12 +293,12 @@ defmodule SQL do
   end
 
   @doc false
-  def plan(tokens, context, id, stack) do
+  def plan(tokens, context, id, stack, config) do
     key = {context.module, id, :plan}
     case :persistent_term.get(key, nil) do
       nil ->
-        {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
-        format = {IO.iodata_to_binary(context.module.to_iodata(tokens, context)), __inspect__(tokens, context, stack)}
+        {:ok, context, tokens} = SQL.Parser.parse(tokens, context, config)
+        format = {context, IO.iodata_to_binary(context.module.to_iodata(tokens, context)), __inspect__(tokens, context, stack)}
         :persistent_term.put(key, format)
         format
 
@@ -292,25 +306,6 @@ defmodule SQL do
         format
     end
   end
-
-  def plan_row_description(tokens, columns) do
-    from = for col <- elem(Enum.find(tokens, {[],[],[]}, &(elem(&1, 0) == :from)), 2), do: col
-    for col <- elem(Enum.find(tokens, {[], [], []}, &(elem(&1, 0) == :select)), 2), do: description_column(col, from, columns)
-  end
-
-  defp description_column({:*,_,_}, _from, columns), do: columns
-  defp description_column({:as, _, [{type, _, _}, {_, _, col}]}, _from, _columns), do: {type, col}
-  defp description_column({:numeric=type, _, _}, _from, _columns), do: {type, nil}
-  defp description_column({:+, _, _}, _from, _columns), do: {:numeric, nil}
-  defp description_column({:-, _, _}, _from, _columns), do: {:numeric, nil}
-  defp description_column({:avg, _, _}, _from, _columns), do: {:numeric, nil}
-  defp description_column({:comma, _, [col]}, from, columns), do: description_column(col, from, columns)
-  defp description_column({:"::", _, [_col, {_, _, type}]}, _from, _columns), do: {type, nil}
-  defp description_column({:ident=type, _, col}, _from, _columns), do: {type, col}
-  defp description_column(_, _from, _columns), do: {:any, nil}
-  # defp description_column(col, from, columns) do
-  #   raise {col, from, columns}
-  # end
 
   @error IO.ANSI.red()
   @reset IO.ANSI.reset()
@@ -344,26 +339,51 @@ defmodule SQL do
   defp reduce(sql, _acc) do
     ref = make_ref()
     self = self()
+    timestamp = System.monotonic_time()
+    entry = {ref, self, timestamp, sql}
     case Process.get(SQL.Transaction) do
-      nil -> send(pick(sql.pool), {ref, self, sql})
-      {owner, conn} -> send(conn, {owner, {ref, self, sql}})
+      nil ->
+        conn = pick(sql.pool)
+        send(conn, entry)
+        result = recv(conn, ref, sql.timeout || 15_000)
+        # Logger.debug(sql: sql, time: System.convert_time_unit(System.monotonic_time()-timestamp, :native, :millisecond))
+        result
+      {owner, conn} ->
+        send(conn, {owner, entry})
+        result = recv(conn, ref, sql.timeout || 15_000)
+        # Logger.debug(sql: sql, time: System.convert_time_unit(System.monotonic_time()-timestamp, :native, :millisecond))
+        result
     end
-    recv(ref)
   end
 
-  defp recv(ref) do
+  defp recv(conn, ref, timeout) do
     receive do
-      {^ref, {:cont, _}} -> recv(ref)
+      {^ref, {:cont, _}} -> recv(conn, ref, timeout)
       {^ref, {:done, _}=msg} -> msg
-      {^ref, {:error, reason}} -> raise reason
+      {^ref, {:error, %{message: message}}} -> raise RuntimeError, message
+    after
+      timeout ->
+        send(conn, {:cancel, ref})
+        recv(conn, ref, timeout)
     end
   end
 
   def conn(%SQL{pool: pool}), do: pick(pool)
   def conn(pool), do: pick(pool)
 
+  if Mix.env == :test do
+    defp conn() do
+      {:links, links} = Process.info(self(), :links)
+      Enum.find_value(links, Process.get(SQL.Conn), &:persistent_term.get({SQL.Conn, &1}, nil))
+    end
+  else
+    defp conn() do
+      Process.get(SQL.Conn)
+    end
+  end
+
   defp pick(pool) do
-    case Process.get(SQL.Conn) do
+    case conn() do
       nil ->
         conns = :persistent_term.get(pool)
         conn = elem(conns, :erlang.phash2({self(), :rand.uniform(1_000_000)}, tuple_size(conns)-1))

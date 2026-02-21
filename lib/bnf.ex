@@ -303,9 +303,11 @@ defmodule SQL.BNF do
       {:or, [type: :postgres], ["or"]},
       {:is, [type: :postgres], ["is"]},
       {:not, [type: :postgres], ["not"]},
+      {:then, [type: :postgres], ["then"]},
+      {:escape, [type: :postgres], ["escape"]},
     ]
     rules = SQL.BNF.parse(%{
-    "<reserved word>" => ~w[| LIMIT | ILIKE | BACKWARD | FORWARD | ISNULL | NOTNULL],
+    "<reserved word>" => ~w[| LIMIT | ILIKE | BACKWARD | FORWARD | ISNULL | NOTNULL | HSTORE],
     operators: operators,
     download: true
     })

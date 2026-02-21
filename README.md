@@ -94,13 +94,14 @@ end
 
 ```elixir
   config :sql, pools: [
-    default: %{
-    username: "postgres",
-    password: "postgres",
-    hostname: "localhost",
-    database: "mydatabase",
-    adapter: SQL.Adapters.Postgres,
-    ssl: false}
+    default: [
+      username: "postgres",
+      password: "postgres",
+      hostname: "localhost",
+      database: "mydatabase",
+      adapter: SQL.Adapters.Postgres,
+      ssl: false
+    ]
   ]
 ```
 
@@ -168,7 +169,7 @@ The package can be installed by adding `sql` to your list of dependencies in `mi
 ```elixir
 def deps do
   [
-    {:sql, "~> 0.4.0"}
+    {:sql, "~> 0.5.0"}
   ]
 end
 ```

@@ -11,28 +11,130 @@ defmodule Mix.Tasks.Sql.Get do
   def run(args) do
     app = Mix.Project.config()[:app]
     Application.load(app)
-    repos = Application.get_env(app, :ecto_repos)
     Mix.Task.run("app.config", args)
-    Application.ensure_all_started(:ecto_sql, :permanent)
-    lock = Enum.reduce(repos, [], fn repo, acc ->
-      repo.__adapter__().ensure_all_started(repo.config(), [])
-      repo.start_link(repo.config())
-      get(repo)++acc
+    Application.ensure_all_started(:sql, :permanent)
+    create_file("sql.lock", gen_template(app), force: true)
+  end
+
+  def gen_template(app \\ :sql) do
+    lock_template(lock: Enum.reduce(Application.get_env(app, :pools), [], &(get(&1)++&2)))
+  end
+
+  def get({name, %{adapter: SQL.Adapters.Postgres}}) do
+    ~SQL"""
+    select
+        table_schema::text,
+        table_name::text,
+        column_name::text,
+        data_type::text,
+        is_nullable = 'YES',
+        COALESCE(character_maximum_length, 0)::int4,
+        COALESCE(numeric_precision, 0)::int4,
+        COALESCE(numeric_scale, 0)::int4,
+        COALESCE(datetime_precision, 0)::int4,
+        udt_name::text,
+        is_identity = 'YES',
+        ordinal_position::int4
+    from information_schema.columns
+    order by table_schema, table_name, ordinal_position
+    """
+    |> SQL.map(fn row -> Map.new(row) end)
+    |> Map.put(:pool, name)
+    |> Enum.to_list()
+  end
+
+  def columns({name, %{adapter: SQL.Adapters.Postgres}}) do
+    ~SQL"""
+    SELECT
+        table_catalog::text,
+        table_schema::text,
+        table_name::text,
+        ARRAY_AGG(column_name::text ORDER BY ordinal_position) AS columns,
+        HSTORE(ARRAY_AGG(column_name::text ORDER BY ordinal_position), ARRAY_AGG(data_type::text ORDER BY ordinal_position)) AS table_info
+    FROM
+        information_schema.columns
+    GROUP BY
+        table_catalog,
+        table_schema,
+        table_name
+    """
+    |> SQL.map(fn row -> Map.new(row) end)
+    |> Map.put(:pool, name)
+    |> Enum.to_list()
+  end
+
+  def enums({name, %{adapter: SQL.Adapters.Postgres}}) do
+    ~SQL"""
+    SELECT
+        n.nspname::text,
+        t.typname::text,
+        ARRAY_AGG(e.enumlabel::text ORDER BY e.enumsortorder) AS values
+    FROM
+        pg_type t
+    JOIN
+        pg_enum e ON t.oid = e.enumtypid
+    JOIN
+        pg_namespace n ON n.oid = t.typnamespace
+    WHERE
+        t.typtype = 'e'
+    GROUP BY
+        n.nspname,
+        t.typname
+    ORDER BY
+        n.nspname,
+        t.typname
+    """
+    |> SQL.map(fn row -> Map.new(row) end)
+    |> Map.put(:pool, name)
+    |> Enum.to_list()
+  end
+
+  def oids({name, %{adapter: SQL.Adapters.Postgres}}) do
+    ~SQL"""
+    SELECT
+        base_type.typname::text AS type,
+        ARRAY_AGG(derived.oid::int4) AS oids
+    FROM
+        pg_type base_type
+    JOIN
+        pg_type derived ON derived.typname = base_type.typname and base_type.typtype != 'e'
+    WHERE
+        base_type.typtype = 'b'
+    GROUP BY
+        base_type.typname
+    ORDER BY
+        base_type.typname
+    """
+    |> SQL.map(fn
+      [{:type, "_" <> type}, {:oids, oids}] -> {{:array, :"#{type}"}, oids}
+      [{:type, type}, {:oids, oids}] -> {:"#{type}", oids}
     end)
-    create_file("sql.lock", lock_template(lock: lock), force: true)
+    |> Map.put(:pool, name)
+    |> Enum.to_list()
+    |> Map.new()
   end
 
-  defp get(repo) do
-    sql = to_query(repo.__adapter__())
-    {:ok, %{columns: columns, rows: rows}} = repo.query(sql.string, sql.params)
-    columns = Enum.map(columns, &String.to_atom(String.downcase(&1)))
-    Enum.map(rows, &Map.new(Enum.zip(columns, &1)))
+  def functions({name, %{adapter: SQL.Adapters.Postgres}}) do
+    ~SQL"""
+    SELECT
+        n.nspname::text AS schema,
+        p.proname::text AS name,
+        pg_get_function_arguments(p.oid)::text AS arguments,
+        pg_get_function_result(p.oid)::text AS return_type,
+        l.lanname::text AS language
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    JOIN pg_language l ON l.oid = p.prolang
+    ORDER BY schema, name
+    """
+    |> Map.put(:pool, name)
+    |> Enum.to_list()
   end
 
-  defp to_query(value) when value in [Ecto.Adapters.Postgres, Postgrex], do: ~SQL"select * from information_schema.columns where table_schema not in ('information_schema', 'pg_catalog')"
-  defp to_query(value) when value in [Ecto.Adapters.Tds, Tds], do: ~SQL"select * from information_schema.columns where table_schema not in ('information_schema', 'pg_catalog')"
-  defp to_query(value) when value in [Ecto.Adapters.MyXQL, MyXQL], do: ~SQL"select * from information_schema.columns where table_schema not in ('mysql', 'performance_schema', 'sys')"
-  defp to_query(value) when value in [Ecto.Adapters.SQLite3, Exqlite], do: ~SQL"select * from sqlite_master join pragma_table_info (sqlite_master.name)"
+
+  # ~SQL"select * from information_schema.columns where table_schema not in ('information_schema', 'pg_catalog')"
+  # ~SQL"select * from information_schema.columns where table_schema not in ('mysql', 'performance_schema', 'sys')"
+  # ~SQL"select * from sqlite_master join pragma_table_info (sqlite_master.name)"
 
   embed_template(:lock, """
     %{

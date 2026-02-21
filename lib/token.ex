@@ -44,6 +44,9 @@ defmodule SQL.Token do
       defp __to_iodata__(:dot, _format, _case, acc) do
         [?.|acc]
       end
+      defp __to_iodata__(:bracket, _format, _case, acc) do
+        [?[,?]|acc]
+      end
       defp __to_iodata__({:paren, [{_, {_,_,_,_,l,c,_,_}}|_]=m, []}, format, case, acc) do
         indention([?(,?)|acc], format, l, c)
       end
@@ -71,8 +74,14 @@ defmodule SQL.Token do
       defp __to_iodata__({tag, m, []}, format, case, acc) do
         indention(to_iodata(tag, format, case, acc), format, m)
       end
+      defp __to_iodata__({:case=tag, [{_, {_,_,_,_,l,c,_,_}}|_]=m, values}, format, case, acc) do
+        indention([to_iodata(tag, format, case, [])|to_iodata(values, format, case, indention(to_iodata(:end, format, case, acc), format, m))], format, l, c)
+      end
       defp __to_iodata__({:paren, [{_, {_,_,_,_,l,c,_,_}}|_]=m, values}, format, case, acc) do
         indention([?(|to_iodata(values, format, case, indention([?)|acc], format, m))], format, l, c)
+      end
+      defp __to_iodata__({:bracket=tag, [{_, {l, c, _, _, _, _, _, _}}|_]=m, [{_, [{_, {l, cc,_,_,_,_}}|_], _}]=values}, format, case, acc) when c >= cc do
+        to_iodata(values, format, case, indention(to_iodata(tag, format, case, acc), format, m))
       end
       defp __to_iodata__({:bracket, [{_, {_,_,_,_,l,c,_,_}}|_]=m, values}, format, case, acc) do
         indention([?[|to_iodata(values, format, case, indention([?]|acc], format, m))], format, l,c)
@@ -103,6 +112,12 @@ defmodule SQL.Token do
       end
       defp __to_iodata__({:double_quote, m, value}=node, format, _case, acc) do
         indention([?", value, ?"|acc], format, m)
+      end
+      defp __to_iodata__(atom, _format, :lower, acc) when is_atom(atom) do
+        ["#{atom}"|acc]
+      end
+      defp __to_iodata__(atom, _format, :upper, acc) when is_atom(atom) do
+        [String.upcase("#{atom}")|acc]
       end
       defp __to_iodata__([token|tokens], format, case, acc) do
         to_iodata(token, format, case, to_iodata(tokens, format, case, acc))

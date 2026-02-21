@@ -7,7 +7,7 @@ defmodule SQL.Lexer do
   @zero "illegal zero width character"
   @bidi "illegal bidi character"
   @cgj "illegal cgj character"
-  @context %{idx: 0, file: "nofile", binding: [], aliases: [], errors: [], module: nil, format: :static, case: :lower, validate: nil}
+  @context %{idx: 0, file: "nofile", binding: [], types: [], aliases: [], errors: [], module: nil, format: :static, case: :lower, validate: nil, description: nil, columns: nil}
   def lex(binary, <<file::binary>> \\ "nofile", idx \\ 0) do
     case lex(binary, %{@context | file: file, idx: idx}, 0, 0, 0, 0, []) do
       {:error, error} -> raise TokenMissingError, [{:snippet, binary} | error]
@@ -72,6 +72,14 @@ defmodule SQL.Lexer do
       <<?-, ?-, rest::binary>> -> comment(rest, [], line, column+2, context, line, column, ol, oc, acc)
       <<?/, ?*, rest::binary>> -> comments(rest, [], line, column+2, context, line, column, ol, oc, acc)
       <<?{, ?{, rest::binary>> -> double_brace(rest, [], line, column, 0, context, 0, 2, ol, oc, acc)
+      <<c, a, s, e, rest::binary>> when c in ~c"cC" and a in ~c"aA" and s in ~c"sS" and e in ~c"eE" ->
+        case lex(rest, context, line, column, line, column, []) do
+          {rest, context, end_line, end_column, ool, ooc, data} ->
+            lex(rest, context, end_line, end_column, end_line, end_column, [{:case, [span: span(line, column, end_line, end_column, ol, oc, ool, ooc), type: :expression, file: context.file], data}|acc])
+          {end_line, end_column, _context, _acc} ->
+            {:error, file: context.file, end_line: end_line, end_column: end_column, line: line, column: column, opening_delimiter: :case, expected_delimiter: :end}
+        end
+      <<e, n, d, rest::binary>> when e in ~c"eE" and n in ~c"nN" and d in ~c"dD" -> {rest, context, line, column, ol, oc, acc}
       <<?`, rest::binary>> -> backtick(rest, [], line, column, context, 0, 1, ol, oc, acc)
       <<?', rest::binary>> -> quote(rest, [], line, column, context, 0, 1, ol, oc, acc)
       <<?", rest::binary>> -> double_quote(rest, [], line, column, context, 0, 1, ol, oc, acc)
@@ -751,7 +759,8 @@ defmodule SQL.Lexer do
   end
 
   defp span(line, column, end_line, end_column, ol, oc, end_line, ooc), do: {line, column, end_line, end_column, line-ol, column-oc, 0, end_column-ooc}
-  defp span(line, column, end_line, end_column, ol, oc, ool, _ooc), do: {line, column, end_line, end_column, line-ol, column-oc, end_line-ool, end_column}
+  defp span(line, column, end_line, end_column, line, oc, ool, _ooc), do: {line, column, end_line, end_column, 0, column-oc, end_line-ool, end_column}
+  defp span(line, column, end_line, end_column, ol, _oc, ool, _ooc), do: {line, column, end_line, end_column, line-ol, end_column, end_line-ool, end_column}
 
   defp span(line, column, end_line, end_column, end_line, oc), do: {line, column, end_line, end_column, 0, column-oc}
   defp span(line, column, end_line, end_column, ol, _oc), do: {line, column, end_line, end_column, line-ol, column}

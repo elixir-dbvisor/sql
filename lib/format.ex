@@ -31,7 +31,7 @@ defmodule SQL.Format do
   defp pad([?\n|_]=acc), do: acc
   defp pad(acc), do: [?\n|acc]
 
-  newline = ~w[select from join where having window limit offset fetch]a
+  newline = ~w[select from join where having window limit offset fetch when else end]a
   {reserved, non_reserved, operators} = SQL.BNF.get_rules()
   for atom <- Enum.uniq(Enum.map(reserved++non_reserved++operators,&elem(&1, 0))), atom not in newline do
     defp to_iodata(unquote(atom), true, _binding ,:lower, _errors, _indent, acc) do
@@ -73,6 +73,36 @@ defmodule SQL.Format do
     end
     defp to_iodata({unquote(atom), _m, values}, false=color, binding, :upper=case, errors, indent, acc) do
       newline([unquote(String.upcase("#{atom}"))|to_iodata(values, color, binding, case, errors, indent, acc)], indent)
+    end
+  end
+  for atom <- ~w[inner outer left right full natural lateral]a do
+    defp to_iodata({unquote(atom), _, [{atom, _, values}]}, true=color, binding, :lower=case, errors, indent, acc) when atom in ~w[inner outer left right full natural lateral join]a do
+      if atom == :join do
+        newline([@keyword, unquote("#{atom}"),?\s,"#{atom}",@reset,?\n|to_iodata(values, color, binding, case, errors, indent+1, acc)], indent)
+      else
+        newline([@keyword, unquote("#{atom}"),?\s,"#{atom}",@reset|to_iodata(values, color, binding, case, errors, indent, acc)], indent)
+      end
+    end
+    defp to_iodata({unquote(atom), _, [{atom, _, values}]}, true=color, binding, :upper=case, errors, indent, acc) when atom in ~w[inner outer left right full natural lateral join]a  do
+      if atom == :join do
+        newline([@keyword, unquote(String.upcase("#{atom}")), String.upcase("#{atom}"), ?\s, @reset,?\n|to_iodata(values, color, binding, case, errors, indent+1, acc)], indent)
+      else
+        newline([@keyword, unquote(String.upcase("#{atom}")), String.upcase("#{atom}"), ?\s, @reset|to_iodata(values, color, binding, case, errors, indent, acc)], indent)
+      end
+    end
+    defp to_iodata({unquote(atom), _, [{atom, _, values}]}, false=color, binding, :lower=case, errors, indent, acc) when atom in ~w[inner outer left right full natural lateral join]a  do
+      if atom == :join do
+        newline([unquote("#{atom}"),?\s,"#{atom}",?\n|to_iodata(values, color, binding, case, errors, indent+1, acc)], indent)
+      else
+        newline([unquote("#{atom}"),?\s,"#{atom}"|to_iodata(values, color, binding, case, errors, indent, acc)], indent)
+      end
+    end
+    defp to_iodata({unquote(atom), _, [{atom, _, values}]}, false=color, binding, :upper=case, errors, indent, acc) when atom in ~w[inner outer left right full natural lateral join]a  do
+      if atom == :join do
+        newline([unquote(String.upcase("#{atom}")),?\s,"#{atom}",?\n|to_iodata(values, color, binding, case, errors, indent+1, acc)], indent)
+      else
+        newline([unquote(String.upcase("#{atom}")),?\s,"#{atom}"|to_iodata(values, color, binding, case, errors, indent, acc)], indent)
+      end
     end
   end
   defp to_iodata({tag, m, values}, color, binding, case, errors, indent, acc) when tag in ~w[by on]a do
@@ -120,6 +150,9 @@ defmodule SQL.Format do
   defp to_iodata({:paren, m, [{t, _, _}|_]=values}, color, binding, case, errors, indent, acc) when t in unquote(newline++~w[group order union except intersect]a) do
     indention([?(|to_iodata(values, color, binding, case, errors, indent+1, [?\n,?)|acc])], m, indent)
   end
+  defp to_iodata({:case=tag, m, values}, color, binding, case, errors, indent, acc) do
+    indention([to_iodata(tag, color, binding, case, errors, indent, [])|to_iodata(values, color, binding, case, errors, indent+1, newline(to_iodata(:end, color, binding, case, errors, indent, acc), indent))], m, indent)
+  end
   defp to_iodata({:paren, m, values}, color, binding, case, errors, indent, acc) do
     indention([?(|to_iodata(values, color, binding, case, errors, 0, [?)|acc])], m, indent)
   end
@@ -130,7 +163,7 @@ defmodule SQL.Format do
     indention([?{|to_iodata(values, color, binding, case, errors, 0, [?}|acc])], m, indent)
   end
   defp to_iodata({_, [], values}, color, binding, case, errors, indent, acc) do
-    to_iodata(values, color, binding, case, errors, indent, acc)
+    indention(to_iodata(values, color, binding, case, errors, 0, acc), 0, indent)
   end
   defp to_iodata({:ident, [_,_,{:tag, tag}|_]=m, [{:paren, _, _}]=values},color,  binding, case, errors, indent, acc) do
     indention(to_iodata(tag, color, binding, case, errors, indent, to_iodata(values, color, binding, case, errors, indent, acc)), m, indent)
@@ -147,15 +180,25 @@ defmodule SQL.Format do
   defp to_iodata({tag, [{_, {l,c,_,_,_,_}}|_]=m, [{_, [{_, {l,lc,_,_,_,_,_,_}}|_], _}=left, {_, [{_, {l,rc,_,_,_,_}}|_], _}=right]}, color, binding, case, errors, indent, acc) when (c > lc and c < rc) do
     to_iodata(left, color, binding, case, errors, indent, indention(to_iodata(tag, color, binding, case, errors, 0, to_iodata(right, color, binding, case, errors, 0, acc)), m, 0))
   end
-  defp to_iodata({tag, [{_, {l,c,_,_,_,_}}|_]=m, [{_, [{_, {ll,cc,_,_,_,_}}|_], _}]=values}, color, binding, case, errors, indent, acc) when (l == ll and c < cc and tag in ~w[desc asc not]a) do
-    to_iodata(values, color, binding, case, errors, indent, indention(to_iodata(tag, color, binding, case, errors, indent, acc), m, 0))
-  end
-  defp to_iodata({tag, [{_, {l,c,_,_,_,_}}|_]=m, [{_, [{_, {ll,cc,_,_,_,_,_,_}}|_], _}]=values}, color, binding, case, errors, indent, acc) when (l == ll and c < cc and tag in ~w[desc asc not]a) do
+  # defp to_iodata({tag, [{_, {l,c,_,_,_,_}}|_]=m, [{_, [{_, {ll,cc,_,_,_,_}}|_], _}]=values}, color, binding, case, errors, indent, acc) when (l == ll and c < cc and tag in ~w[desc asc not]a) do
+  #   to_iodata(values, color, binding, case, errors, indent, indention(to_iodata(tag, color, binding, case, errors, indent, acc), m, 0))
+  # end
+  # defp to_iodata({tag, [{_, {l,c,_,_,_,_}}|_]=m, [{_, [{_, {ll,cc,_,_,_,_,_,_}}|_], _}]=values}, color, binding, case, errors, indent, acc) when (l == ll and c < cc and tag in ~w[desc asc not]a) do
+  #   to_iodata(values, color, binding, case, errors, indent, indention(to_iodata(tag, color, binding, case, errors, indent, acc), m, 0))
+  # end
+  defp to_iodata({tag, m, values}, color, binding, case, errors, indent, acc) when tag in ~w[desc asc not]a do
     to_iodata(values, color, binding, case, errors, indent, indention(to_iodata(tag, color, binding, case, errors, indent, acc), m, 0))
   end
   defp to_iodata({tag, _m, [left, right]}, color, binding, case, errors, indent, acc) when tag in ~w[union except intersect]a do
     to_iodata(left, color, binding, case, errors, indent, newline(to_iodata(tag, color, binding, case, errors, indent, to_iodata(right, color, binding, case, errors, indent, acc)), indent))
   end
+  defp to_iodata({tag, _m, [left, right]}, color, binding, case, errors, indent, acc) when tag in ~w[as and]a do
+    to_iodata(left, color, binding, case, errors, indent, [?\s|to_iodata(tag, color, binding, case, errors, indent, to_iodata(right, color, binding, case, errors, indent, acc))])
+  end
+  defp to_iodata({tag, [_,{_, :operator}|_], [left, right]}, color, binding, case, errors, indent, acc) do
+    to_iodata(left, color, binding, case, errors, indent, to_iodata(tag, color, binding, case, errors, indent, to_iodata(right, color, binding, case, errors, indent, acc)))
+  end
+
   defp to_iodata({tag, m, [{_,_,_}|_]=values}, color, binding, case, errors, indent, acc) do
     indention(to_iodata(tag, color, binding, case, errors, indent, to_iodata(values, color, binding, case, errors, indent, acc)), m, 0)
   end
@@ -182,6 +225,12 @@ defmodule SQL.Format do
       true -> indention([?",value, ?"|acc], m, indent)
       false -> indention([?", value, ?"|acc], m, indent)
     end
+  end
+  defp to_iodata(atom, _color, _binding ,:lower, _errors, _indent, acc) when is_atom(atom) do
+    ["#{atom}"|acc]
+  end
+  defp to_iodata(atom, _color, _binding, :upper, _errors, _indent, acc) when is_atom(atom) do
+   [String.upcase("#{atom}")|acc]
   end
   defp to_iodata([token|tokens], color, binding, case, errors, indent, acc) do
     to_iodata(token, color, binding, case, errors, indent, to_iodata(tokens, color, binding, case, errors, indent, acc))
