@@ -73,15 +73,6 @@ For custom mapping of rows:
 |> Enum.to_list()
 ```
 
-For **Ecto interoperability:**
-
-```elixir
-~SQL[from users select *]
-|> SQL.map(fn row, columns -> Repo.load(User, {columns, row}) end)
-|> Enum.to_list()
-```
-> Note: `struct(User, row)` can replace `Repo.load` when using a custom adapter or when you don’t need full Ecto integration.
-
 ## Streaming
 
 ```elixir
