@@ -14,7 +14,7 @@ defmodule SQL.Application do
     for {name, opts} <- pools do
       pid = Process.whereis(name)
       children = Supervisor.which_children(pid)
-      pids = Enum.map(children, fn {_id, pid, _type, _mod} -> pid end)
+      pids = Enum.reverse(Enum.map(children, fn {_id, pid, _type, _mod} -> pid end))
       :persistent_term.put(name, List.to_tuple(pids))
       :persistent_term.put({name, :oids}, Mix.Tasks.Sql.Get.oids({name, Map.new(opts)}))
       # :persistent_term.put({name, :types}, {Mix.Tasks.Sql.Get.get(key), Mix.Tasks.Sql.Get.columns(key), Mix.Tasks.Sql.Get.enums(key), Mix.Tasks.Sql.Get.oids(key), Mix.Tasks.Sql.Get.functions(key)})

@@ -19,7 +19,7 @@ defmodule SQL.Pool do
       for n <- 1..:erlang.system_info(:schedulers_online) do
         %{
           id: {:conn, n},
-          start: {state.adapter, :start, [struct(state, scheduler_id: n+1, label: :"#{state.name}_#{n}")]},
+          start: {state.adapter, :start, [struct(state, scheduler_id: n, label: :"#{state.name}_#{n}")]},
           restart: :permanent,
           shutdown: 5000,
           type: :worker,

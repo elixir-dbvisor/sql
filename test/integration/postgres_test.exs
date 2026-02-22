@@ -162,4 +162,11 @@ defmodule SQL.Integration.PostgresTest do
     Task.Supervisor.async_nolink(SQL.TaskSupervisor, fun)
     assert_receive ^state
   end
+
+  test "connection pool is self healing" do
+    conn = elem(:persistent_term.get(:default), 0)
+    Process.exit(conn, :shutdown)
+    Process.sleep(50)
+    refute elem(:persistent_term.get(:default), 0) == conn
+  end
 end

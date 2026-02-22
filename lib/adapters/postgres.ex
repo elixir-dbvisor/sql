@@ -14,7 +14,11 @@ defmodule SQL.Adapters.Postgres do
   @ssl <<8::32, 80877103::32>>
 
   def start(state) do
-    {:ok, spawn_link(fn -> init(state) end)}
+    pid = spawn_link(fn -> init(state) end)
+    case :persistent_term.get(state.name, nil) do
+      nil -> {:ok, pid}
+      pool -> {:persistent_term.put(state.name, :erlang.setelement(state.scheduler_id, pool, pid)), pid}
+    end
   end
 
   defp to_iodata({:in, m, [{:not, _, left}, {:binding, _, [idx]}]}, format, case, acc) do
