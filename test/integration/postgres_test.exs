@@ -145,13 +145,21 @@ defmodule SQL.Integration.PostgresTest do
     end
   end
 
-  test "transaction state are propagated through links" do
+  test "transaction state are propagated" do
     state = Process.get(SQL.Transaction)
     parent = self()
-    spawn_link(fn -> send(parent, SQL.conn(:default)) end)
+    fun = fn -> send(parent, SQL.conn(:default)) end
+    spawn_link(fun)
     assert_receive ^state
 
-    spawn(fn -> send(parent, SQL.conn(:default)) end)
-    refute_receive ^state
+    spawn(fun)
+    assert_receive ^state
+
+    Task.async(fun)
+    assert_receive ^state
+
+    Task.Supervisor.start_link(name: SQL.TaskSupervisor)
+    Task.Supervisor.async_nolink(SQL.TaskSupervisor, fun)
+    assert_receive ^state
   end
 end

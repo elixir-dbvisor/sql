@@ -374,7 +374,9 @@ defmodule SQL do
   if Mix.env == :test do
     defp conn() do
       {:links, links} = Process.info(self(), :links)
-      Enum.find_value(links, Process.get(SQL.Conn), &:persistent_term.get({SQL.Conn, &1}, nil))
+      {:parent, parent} = Process.info(self(), :parent)
+      pids = Enum.uniq([parent|links] ++ Process.get(:"$callers", []) ++ Process.get(:"$ancestors", []))
+      Enum.find_value(pids, Process.get(SQL.Conn), &:persistent_term.get({SQL.Conn, &1}, nil))
     end
   else
     defp conn() do
