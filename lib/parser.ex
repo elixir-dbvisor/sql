@@ -186,10 +186,15 @@ defmodule SQL.Parser do
     node = {t,m,a++acc}
     parse(tokens, context, unit, unit, [node|root], acc2, validate(node, context, errors))
   end
-  defp parse([{t,m,[]=unit}|tokens], context, a, acc, root, acc2, errors) when t in ~w[select where group having order limit offset]a do
+  defp parse([{t,m,[]=unit}|tokens], context, a, acc, root, acc2, errors) when t in ~w[select where group having order limit offset delete update set]a do
     {a, context} = __parse__(a, context)
     node = {t,m,a++acc}
     parse(tokens, context, unit, unit, [node|root], acc2, validate(node, context, errors))
+  end
+  defp parse([{_,[span, type, {:tag, t} | m],_}|tokens], context, a, acc, root, acc2, errors) when t in ~w[returning]a do
+    {a, context} = __parse__(a, context)
+    node = {t,[span, type|m],a++acc}
+    parse(tokens, context, [], [], [node|root], acc2, validate(node, context, errors))
   end
   defp parse([{t,m,a}|tokens], context, unit, acc, root, acc2, errors) when t in ~w[paren bracket]a do
     {:ok, context, a} = parse(a, context)
@@ -206,7 +211,7 @@ defmodule SQL.Parser do
     parse(tokens, context, [node|unit], acc, root, acc2, errors)
   end
 
-  @literal ~w[numeric ident double_quote quote bracket dot binding paren some]a
+  @literal ~w[numeric ident double_quote quote bracket dot binding paren some ::]a
   @comparison ~w[= != <> < > <= >= in is like ilike between notnull isnull and or]a
   defp __parse__(tokens, context) do
     case tokens do
@@ -341,17 +346,17 @@ defmodule SQL.Parser do
     context
   end
 
-  @order %{select: 0, from: 1, join: 2, left: 2, right: 2, inner: 2, natural: 2, full: 2, cross: 2, where: 3, group: 4, having: 5, window: 6, order: 7, limit: 8, offset: 9, fetch: 10}
+  @order %{delete: 0, update: 0, select: 0, set: 1, from: 1, join: 2, left: 2, right: 2, inner: 2, natural: 2, full: 2, cross: 2, where: 3, group: 4, having: 5, window: 6, order: 7, limit: 8, offset: 9, fetch: 10, returning: 11}
   defp sort(acc), do: Enum.sort_by(acc, fn {tag, _, _} -> Map.get(@order, tag) end, :asc)
 
   defp validate(_, %{validate: nil}, errors), do: errors
-  defp validate({tag, _, values}, %{validate: fun}, errors) when tag in ~w[select having where on by order group]a do
+  defp validate({tag, _, values}, %{validate: fun}, errors) when tag in ~w[select set having where on by order group returning]a do
     case validate_columns(fun, values, []) do
       [] -> errors
       e -> e++errors
     end
   end
-  defp validate({tag, _, values}, %{validate: fun} = context, errors) when tag in ~w[from join]a do
+  defp validate({tag, _, values}, %{validate: fun} = context, errors) when tag in ~w[delete update from join]a do
     values
     |> Enum.reduce([], fn
       {:on, _, _} = node, acc -> validate(node, context, acc)
@@ -394,8 +399,8 @@ defmodule SQL.Parser do
   defp validate_columns(_fun, _, acc), do: acc
 
   defp description(tokens, context, columns) do
-    from = elem(Enum.find(tokens, {[], [], []}, &(is_tuple(&1) && elem(&1, 0) == :from)), 2)
-    description = case resolve_column(Enum.find(tokens, {[], [], []}, &(is_tuple(&1) && elem(&1, 0) == :select)), from, columns, context) do
+    from = elem(Enum.find(tokens, {[], [], []}, &(is_tuple(&1) && elem(&1, 0) in ~w[from update delete]a)), 2)
+    description = case resolve_column(Enum.find(tokens, {[], [], []}, &(is_tuple(&1) && elem(&1, 0) in ~w[select returning]a)), from, columns, context) do
       {:record, values} -> values
       values -> values
     end
@@ -418,6 +423,9 @@ defmodule SQL.Parser do
     {:record, [:void]}
   end
   defp resolve_column({:select, _, values}, from, columns, context) do
+    {:record, List.flatten(Enum.map(values, &resolve_column(&1, from, columns, context)))}
+  end
+  defp resolve_column({:returning, _, values}, from, columns, context) do
     {:record, List.flatten(Enum.map(values, &resolve_column(&1, from, columns, context)))}
   end
   defp resolve_column({:row, _, [{:paren, _, values}]}, from, columns, context) do

@@ -31,7 +31,7 @@ defmodule SQL.Format do
   defp pad([?\n|_]=acc), do: acc
   defp pad(acc), do: [?\n|acc]
 
-  newline = ~w[select from join where having window limit offset fetch when else end]a
+  newline = ~w[select from join where having window limit offset fetch when else end returning set]a
   {reserved, non_reserved, operators} = SQL.BNF.get_rules()
   for atom <- Enum.uniq(Enum.map(reserved++non_reserved++operators,&elem(&1, 0))), atom not in newline do
     defp to_iodata(unquote(atom), true, _binding ,:lower, _errors, _indent, acc) do

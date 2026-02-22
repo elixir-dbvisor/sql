@@ -17,6 +17,7 @@ defmodule Mix.Tasks.Sql.Get do
   end
 
   def gen_template(app \\ :sql) do
+    Application.ensure_all_started(:sql, :permanent)
     lock_template(lock: Enum.reduce(Application.get_env(app, :pools), [], &(get(&1)++&2)))
   end
 
@@ -42,6 +43,7 @@ defmodule Mix.Tasks.Sql.Get do
     |> Map.put(:pool, name)
     |> Enum.to_list()
   end
+  def get({name, opts}), do: get({name, Map.new(opts)})
 
   def columns({name, %{adapter: SQL.Adapters.Postgres}}) do
     ~SQL"""
