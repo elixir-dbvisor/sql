@@ -12,6 +12,7 @@ defmodule SQL.Adapters.Postgres do
 
   @sync <<?S, 4::32-big>>
   @ssl <<8::32, 80877103::32>>
+  @timezone <<?Q, 25::32, "SET TIME ZONE 'UTC';", 0>>
 
   def start(state) do
     pid = spawn_link(fn -> init(state) end)
@@ -249,10 +250,12 @@ defmodule SQL.Adapters.Postgres do
         parse_messages(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
       <<?C, len::32, "ROLLBACK", _payload::binary-size(len-12), rest::binary>> ->
         parse_messages(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
+      <<?C, _::32, 83, 69, 84, 0, rest::binary>> ->
+        parse_messages(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
       <<?C, len::32, _payload::binary-size(len-4), rest::binary>> ->
         %{^current => {ref, caller, _timestamp, sql}} = inflight
         send_data(state, close(sql))
-        send caller, {ref, Enumerable.reduce(rows, {:cont, []}, sql.fn)}
+        send caller, {ref, Enumerable.reduce(rows, sql.acc, sql.fn)}
         parse_messages(state, rest, Map.delete(inflight, current), prepared, total, current+1, queue, owner, [], 0)
         # case Map.split_with(inflight, fn {_k, {s, _}} -> sql===s end) do
         #   {callers, inf} when map_size(inf) == 0 ->
@@ -271,14 +274,15 @@ defmodule SQL.Adapters.Postgres do
       <<?K, 12::32, pid::32, secret::32, rest::binary>> ->
         parse_messages(Map.put(Map.put(state, :secret, secret), :pid, pid), rest, inflight, prepared, total, current, queue, owner, rows, count)
       <<?D, len::32, payload::binary-size(len-4), rest::binary>> when count == 999 and owner != nil ->
-        %{^current => {ref, caller, _timestamp, %{columns: columns, fn: fun}}} = inflight
-        {_, rows} = Enumerable.reduce([parse_data_row(payload, columns)|rows], {:cont, []}, fun)
+        %{^current => {ref, caller, _timestamp, %{columns: columns, fn: fun, acc: acc}}} = inflight
+        {_, rows} = Enumerable.reduce([parse_data_row(payload, columns)|rows], acc, fun)
         send caller, {ref, {:cont, rows}}
         parse_messages(state, rest, inflight, prepared, total, current, queue, owner, [], 0)
       <<?D, len::32, payload::binary-size(len-4), rest::binary>> ->
         %{^current => {_ref, _caller, _timestamp, %{columns: columns}}} = inflight
         parse_messages(state, rest, inflight, prepared, total, current, queue, owner, [parse_data_row(payload, columns)|rows], count+1)
       <<?Z, len::32, _payload::binary-size(len-4), rest::binary>> when total == 0 and map_size(prepared) == 0 ->
+        send_data(state, @timezone)
         case :persistent_term.get({SQL, :queries}, []) do
           [] ->
             handle_data(state, rest, inflight, prepared, total, current, queue, owner, rows, count)

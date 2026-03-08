@@ -95,10 +95,13 @@ defmodule SQL.Token do
       defp __to_iodata__({:ident, [_,_,{:tag, tag}|_]=m, [{:paren, _, _}]=values}, format, case, acc) do
         indention(to_iodata(tag, format, case, to_iodata(values, format, case, acc)), format, m)
       end
+      defp __to_iodata__({:"::"=tag, [_,{_, type}|_]=m, [left, right]}, format, case, acc) do
+        to_iodata(left, format, case, to_iodata(tag, format, case, to_iodata(right, format, case, acc)))
+      end
       defp __to_iodata__({tag, [{_, {l,c,_,_,_,_}}|_]=m, [{_, [{_, {ll,cc,_,_,_,_}}|_], _}]=values}, format, case, acc) when l >= ll and c >= cc do
         to_iodata(values, format, case, indention(to_iodata(tag, format, case, acc), format, m))
       end
-      defp __to_iodata__({tag, [_,{_, type}|_]=m, [left, right]}, format, case, acc) when type == :operator or tag in ~w[between cursor for to union except intersect]a do
+      defp __to_iodata__({tag, [_,{_, type}|_]=m, [left, right]}, format, case, acc) when type == :operator or tag in ~w[between cursor for to union except intersect over]a do
         to_iodata(left, format, case, indention(to_iodata(tag, format, case, to_iodata(right, format, case, acc)), format, m))
       end
       defp __to_iodata__({:ident, m, value}=node, format, :upper, acc) do

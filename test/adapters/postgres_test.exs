@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2025 DBVisor
 
 defmodule SQL.Adapters.PostgresTest do
-  use SQL.Case, async: true
+  use ExUnit.Case, async: true
   use SQL, adapter: SQL.Adapters.Postgres
 
   describe "with" do

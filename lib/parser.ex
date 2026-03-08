@@ -3,11 +3,14 @@
 
 defmodule SQL.Parser do
   @moduledoc false
-  @compile {:inline, validate: 3, validate_columns: 3, validate_table: 3, sort: 1, description: 3}
+  @compile {:inline, validate: 3, validate_columns: 3, validate_table: 3, sort: 1, description: 6}
 
-  def parse(tokens, context, config \\ %{columns: []}) do
+  def parse(tokens, context) do
     case parse(tokens, context, [], [], [], [], []) do
-      {:ok, context, tokens} -> {:ok, description(tokens, context, Map.get(config, :columns, [])), tokens}
+      {:ok, %{columns: columns, types: types}=context, tokens} ->
+        {columns, aliases, types} = description(tokens, List.wrap(columns), types, [], [], [])
+        context = %{context | description: columns, types: types, aliases: aliases}
+        {:ok, context, tokens}
     end
   end
   defp parse([], context, [], [], [], tokens, errors) do
@@ -23,12 +26,10 @@ defmodule SQL.Parser do
     {:ok, %{context | errors: errors++context.errors}, sorted++tokens}
   end
   defp parse([], context, a, acc, [], [], errors) do
-    {a, context} = __parse__(a, context)
-    {:ok, %{context | errors: errors++context.errors}, a++acc}
+    {:ok, %{context | errors: errors++context.errors}, __parse__(a)++acc}
   end
   defp parse([], context, a, [], root, [], errors) do
-    {a, context} = __parse__(a, context)
-    {:ok, %{context | errors: errors++context.errors}, a++root}
+    {:ok, %{context | errors: errors++context.errors}, __parse__(a)++root}
   end
   defp parse([], context, unit, acc, root, [], errors) do
     {:ok, %{context | errors: errors++context.errors}, unit++acc++root}
@@ -37,32 +38,28 @@ defmodule SQL.Parser do
     {:ok, context, a} = parse(a, context)
     parse(tokens, context, [{:"#{:string.lowercase(v)}",m,[{t,mm,a}]}|unit], acc, root, acc2, errors)
   end
-  defp parse([{:paren=t,m,a},{tt,[_,{:type, :reserved}|_]=mm,aa}|tokens], context, unit, acc, root, acc2, errors) when tt not in ~w[select where group having order limit offset]a do
+  defp parse([{:paren=t,m,a},{tt,[_,{:type, :reserved}|_]=mm,aa}|tokens], context, unit, acc, root, acc2, errors) when tt not in ~w[select where group having order limit offset join over]a do
     {:ok, context, a} = parse(a, context)
     parse(tokens, context, [{tt,mm,[{t,m,a}|aa]}|unit], acc, root, acc2, errors)
   end
   defp parse([{:with=t, m, unit}|tokens], context, a, acc, root, acc2, errors) do
-    {a, context} = __parse__(a, context)
     sorted = sort(root)
     context = if sorted != root do
       %{context|format: :dynamic}
     else
       context
     end
-    parse(tokens, context, unit, unit, [{t, m, a++acc++sorted}], acc2, errors)
+    parse(tokens, context, unit, unit, [{t, m, __parse__(a)++acc++sorted}], acc2, errors)
   end
   defp parse([{:comma=t, m, a}|tokens], context, unit, acc, root, acc2, errors) do
-    {unit, context} = __parse__(unit, context)
-    parse(tokens, context, a, [{t, m, unit}|acc], root, acc2, errors)
+    parse(tokens, context, a, [{t, m, __parse__(unit)}|acc], root, acc2, errors)
   end
   defp parse([{:when=t, m, a}|tokens], context, unit, acc, root, acc2, errors) do
     Process.put(:status, true)
-    {unit, context} = __parse__(unit, context)
-    parse(tokens, context, a, [{t, m, unit}|acc], root, acc2, errors)
+    parse(tokens, context, a, [{t, m, __parse__(unit)}|acc], root, acc2, errors)
   end
   defp parse([{:else=t, m, a}|tokens], context, unit, acc, root, acc2, errors) do
-    {unit, context} = __parse__(unit, context)
-    parse(tokens, context, a, [{t, m, unit}|acc], root, acc2, errors)
+    parse(tokens, context, a, [{t, m, __parse__(unit)}|acc], root, acc2, errors)
   end
   defp parse([{:colon=t, tm, ta}|tokens], context, []=unit, []=acc, root, acc2, errors) do
     {:ok, context, ta} = parse(ta, context)
@@ -73,6 +70,9 @@ defmodule SQL.Parser do
       context
     end
     parse(tokens, context, unit, acc, acc, [{t, tm, ta},sorted|acc2], errors)
+  end
+  defp parse([{:quote,_,_}=r, {:interval=t,m,a}|tokens], context, unit, acc, root, acc2, errors) do
+    parse(tokens, context, [{t,m,[r|a]}|unit], acc, root, acc2, errors)
   end
   defp parse([{:dot=t,tm,ta},l|tokens], context, [{:dot,_,_}=r|unit], acc, root, acc2, errors) do
     parse(tokens, context, [{t,tm,[l,r|ta]}|unit], acc, root, acc2, errors)
@@ -98,9 +98,8 @@ defmodule SQL.Parser do
   defp parse([r,{:from=t,tm,ta},l,{:fetch=f,fm,fa}|tokens], context, []=unit, []=acc, root, acc2, errors) do
     parse(tokens, context, unit, acc, [{f,fm,[l,{t,tm,[r|ta]}|fa]}|root], acc2, errors)
   end
-  defp parse([{t,m,unit}|tokens], context, a, acc, root, acc2, errors) when t in ~w[by on]a do
-    {a, context} = __parse__(a, context)
-    parse(tokens, context, unit, [{t,m,a++acc}], root, acc2, errors)
+  defp parse([{t,m,unit}|tokens], context, a, acc, root, acc2, errors) when t in ~w[by on into]a do
+    parse(tokens, context, unit, [{t,m,__parse__(a)++acc}], root, acc2, errors)
   end
   defp parse([{_,[_,_,{:tag,t}|_]=m,_}|tokens], context, unit, acc, root, acc2, errors) when t in ~w[asc desc]a do
     parse(tokens, context, [{t,m,[]}|unit], acc, root, acc2, errors)
@@ -157,43 +156,35 @@ defmodule SQL.Parser do
     parse([], context, unit, acc, [{t,tm,[la, sorted|ta]}], acc2, errors)
   end
   defp parse([{:join=t,m,[]=unit}, {:outer=o, om, oa}, {l, lm, la}, {:natural=n, nm, na}|tokens], context, [{tag,_,_}|_]=a, acc, root, acc2, errors) when l in ~w[left right full]a and tag in ~w[double_quote bracket dot ident as paren]a do
-    {a, context} = __parse__(a, context)
-    node = {t,m,a++acc}
+    node = {t,m,__parse__(a)++acc}
     parse(tokens, context, unit, unit, [{n, nm, [{l, lm, [{o, om, [node|oa]}|la]}|na]}|root], acc2, validate(node, context, errors))
   end
   defp parse([{:join=t,m,[]=unit}, {:outer=o, om, oa}, {l, lm, la}|tokens], context, [{tag,_,_}|_]=a, acc, root, acc2, errors) when l in ~w[left right full]a and tag in ~w[double_quote bracket dot ident as paren]a do
-    {a, context} = __parse__(a, context)
-    node = {t,m,a++acc}
+    node = {t,m,__parse__(a)++acc}
     parse(tokens, context, unit, unit, [{l, lm, [{o, om, [node|oa]}|la]}|root], acc2, validate(node, context, errors))
   end
   defp parse([{:join=t,m,[]=unit}, {:inner=i, im, ia}, {:natural=n, nm, []=na}|tokens], context, [{tag,_,_}|_]=a, acc, root, acc2, errors) when tag in ~w[double_quote bracket dot ident as paren]a do
-    {a, context} = __parse__(a, context)
-    node = {t,m,a++acc}
+    node = {t,m,__parse__(a)++acc}
     parse(tokens, context, unit, unit, [{n, nm, [{i, im, [node|ia]}|na]}|root], acc2, validate(node, context, errors))
   end
   defp parse([{:join=t,m,[]=unit}, {l, lm, []=la}|tokens], context, [{tag,_,_}|_]=a, acc, root, acc2, errors) when l in ~w[inner left right full natural cross]a and tag in ~w[double_quote bracket dot ident as paren]a do
-    {a, context} = __parse__(a, context)
-    node = {t,m,a++acc}
+    node = {t,m,__parse__(a)++acc}
     parse(tokens, context, unit, unit, [{l, lm, [node|la]}|root], acc2, validate(node, context, errors))
   end
   defp parse([{:join=t,m,[]=unit}|tokens], context, [{tag,_,_}|_]=a, acc, root, acc2, errors) when tag in ~w[double_quote bracket dot ident as paren]a do
-    {a, context} = __parse__(a, context)
-    node = {t,m,a++acc}
+    node = {t,m,__parse__(a)++acc}
     parse(tokens, context, unit, unit, [node|root], acc2, validate(node, context, errors))
   end
   defp parse([{:from=t,m,[]=unit}|tokens], context, [{tag,_,_}|_]=a, acc, root, acc2, errors) when tag in ~w[double_quote bracket dot ident as binding]a do
-    {a, context} = __parse__(a, context)
-    node = {t,m,a++acc}
+    node = {t,m,__parse__(a)++acc}
     parse(tokens, context, unit, unit, [node|root], acc2, validate(node, context, errors))
   end
-  defp parse([{t,m,[]=unit}|tokens], context, a, acc, root, acc2, errors) when t in ~w[select where group having order limit offset delete update set]a do
-    {a, context} = __parse__(a, context)
-    node = {t,m,a++acc}
+  defp parse([{t,m,[]=unit}|tokens], context, a, acc, root, acc2, errors) when t in ~w[select where group having order limit offset delete update set insert]a do
+    node = {t,m,__parse__(a)++acc}
     parse(tokens, context, unit, unit, [node|root], acc2, validate(node, context, errors))
   end
   defp parse([{_,[span, type, {:tag, t} | m],_}|tokens], context, a, acc, root, acc2, errors) when t in ~w[returning]a do
-    {a, context} = __parse__(a, context)
-    node = {t,[span, type|m],a++acc}
+    node = {t,[span, type|m],__parse__(a)++acc}
     parse(tokens, context, [], [], [node|root], acc2, validate(node, context, errors))
   end
   defp parse([{t,m,a}|tokens], context, unit, acc, root, acc2, errors) when t in ~w[paren bracket]a do
@@ -213,144 +204,133 @@ defmodule SQL.Parser do
 
   @literal ~w[numeric ident double_quote quote bracket dot binding paren some ::]a
   @comparison ~w[= != <> < > <= >= in is like ilike between notnull isnull and or]a
-  defp __parse__(tokens, context) do
+  defp __parse__(tokens) do
     case tokens do
-      [{tl, _, [_,_]}=l, {t=:then, m, []=a}, r|[]=rest] when tl in ~w[and or =]a -> __parse__([{t, m, [l,r|a]}|rest], context)
+      [{tl, _, [_,_]}=l, {t=:then, m, []=a}, r|[]=rest] when tl in ~w[and or =]a -> __parse__([{t, m, [l,r|a]}|rest])
 
-      [{tl, _, [_,_]}=l, {t=:and, m, []=a}, {tr, _, [_,_]}=r|rest] when tl in @comparison and tr in @comparison -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, [_,_]}=l, {t=:or, m, []=a}, {tr, _, [_,_]}=r|rest] when tl in @comparison and tr in @comparison -> __parse__([{t, m, [l,r|a]}|rest], context)
+      [{tl, _, [_,_]}=l, {t=:and, m, []=a}, {tr, _, [_,_]}=r|rest] when tl in @comparison and tr in @comparison -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, [_,_]}=l, {t=:or, m, []=a}, {tr, _, [_,_]}=r|rest] when tl in @comparison and tr in @comparison -> __parse__([{t, m, [l,r|a]}|rest])
 
-      [{tl, _, [_,_]}=l, {t=:and, m, []=a}, {tr, _, []}=r|rest] when tl in @comparison and tr in ~w[true false null unknown]a -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, [_,_]}=l, {t=:or, m, []=a}, {tr, _, []}=r|rest] when tl in @comparison and tr in ~w[true false null unknown]a -> __parse__([{t, m, [l,r|a]}|rest], context)
+      [{tl, _, [_,_]}=l, {t=:and, m, []=a}, {tr, _, []}=r|rest] when tl in @comparison and tr in ~w[true false null unknown]a -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, [_,_]}=l, {t=:or, m, []=a}, {tr, _, []}=r|rest] when tl in @comparison and tr in ~w[true false null unknown]a -> __parse__([{t, m, [l,r|a]}|rest])
 
-      [{tl, _, []}=l, {t=:and, m, []=a}, {tr, _, [_,_]}=r|rest] when tl in ~w[true false null unknown]a and tr in @comparison -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, []}=l, {t=:or, m, []=a}, {tr, _, [_,_]}=r|rest] when tl in ~w[true false null unknown]a and tr in @comparison -> __parse__([{t, m, [l,r|a]}|rest], context)
+      [{tl, _, []}=l, {t=:and, m, []=a}, {tr, _, [_,_]}=r|rest] when tl in ~w[true false null unknown]a and tr in @comparison -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, []}=l, {t=:or, m, []=a}, {tr, _, [_,_]}=r|rest] when tl in ~w[true false null unknown]a and tr in @comparison -> __parse__([{t, m, [l,r|a]}|rest])
 
 
       [{tl, _, [_,_]}=l, {:and, _, []}=r|rest] when tl in @comparison ->
-        {tokens, context} = __parse__(rest, context)
-        __parse__([l,r|tokens], context)
+        __parse__([l,r|__parse__(rest)])
       [{tl, _, [_,_]}=l, {:or, _, []}=r|rest] when tl in @comparison ->
-        {tokens, context} = __parse__(rest, context)
-        __parse__([l,r|tokens], context)
+        __parse__([l,r|__parse__(rest)])
 
-      [{tl, _, _}=l, {t=:asc, m, []=a}|rest] when tl in @literal -> __parse__([{t, m, [l|a]}|rest], context)
-      [{tl, _, _}=l, {t=:desc, m, []=a}|rest] when tl in @literal -> __parse__([{t, m, [l|a]}|rest], context)
+      [{tl, _, _}=l, {t=:asc, m, []=a}|rest] when tl in @literal -> __parse__([{t, m, [l|a]}|rest])
+      [{tl, _, _}=l, {t=:desc, m, []=a}|rest] when tl in @literal -> __parse__([{t, m, [l|a]}|rest])
 
-      [{tl, _, _}=l, {t=:*, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:/, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:%, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:+, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:-, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
+      [l, {t=:*, m, []=a}, r|[]=rest] -> __parse__([{t, m, [l,r|a]}|rest])
+      [l, {t=:/, m, []=a}, r|[]=rest] -> __parse__([{t, m, [l,r|a]}|rest])
+      [l, {t=:%, m, []=a}, r|[]=rest] -> __parse__([{t, m, [l,r|a]}|rest])
+      [l, {t=:+, m, []=a}, r|[]=rest] -> __parse__([{t, m, [l,r|a]}|rest])
+      [l, {t=:-, m, []=a}, r|[]=rest] -> __parse__([{t, m, [l,r|a]}|rest])
 
-      [l, {t=:=, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [l, {t=:!=, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [l, {t=:<>, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [l, {t=:<, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [l, {t=:>, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [l, {t=:<=, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [l, {t=:>=, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest], context)
+      [l, {t=:*, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest])
+      [l, {t=:/, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest])
+      [l, {t=:%, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest])
+      [l, {t=:+, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest])
+      [l, {t=:-, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest])
 
-      [{tl, _, _}=l, {t=:=, m, []=a}, r|[]=rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:!=, m, []=a}, r|[]=rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:<>, m, []=a}, r|[]=rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:<, m, []=a}, r|[]=rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:>, m, []=a}, r|[]=rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:<=, m, []=a}, r|[]=rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:>=, m, []=a}, r|[]=rest] when tl in @literal  -> __parse__([{t, m, [l,r|a]}|rest], context)
+      [l, {t=:=, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest])
+      [l, {t=:!=, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest])
+      [l, {t=:<>, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest])
+      [l, {t=:<, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest])
+      [l, {t=:>, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest])
+      [l, {t=:<=, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest])
+      [l, {t=:>=, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest])
+
+      [{tl, _, _}=l, {t=:=, m, []=a}, r|[]=rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, _}=l, {t=:!=, m, []=a}, r|[]=rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, _}=l, {t=:<>, m, []=a}, r|[]=rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, _}=l, {t=:<, m, []=a}, r|[]=rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, _}=l, {t=:>, m, []=a}, r|[]=rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, _}=l, {t=:<=, m, []=a}, r|[]=rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, _}=l, {t=:>=, m, []=a}, r|[]=rest] when tl in @literal  -> __parse__([{t, m, [l,r|a]}|rest])
 
       [l, {:=, _, _}=r|rest] ->
-        {tokens, context} = __parse__(rest, context)
-        __parse__([l,r|tokens], context)
+        __parse__([l,r|__parse__(rest)])
       [l, {:!=, _, _}=r|rest] ->
-        {tokens, context} = __parse__(rest, context)
-        __parse__([l,r|tokens], context)
+        __parse__([l,r|__parse__(rest)])
       [l, {:<>, _, _}=r|rest] ->
-        {tokens, context} = __parse__(rest, context)
-        __parse__([l,r|tokens], context)
+        __parse__([l,r|__parse__(rest)])
       [l, {:<, _, _}=r|rest] ->
-        {tokens, context} = __parse__(rest, context)
-        __parse__([l,r|tokens], context)
+        __parse__([l,r|__parse__(rest)])
       [l, {:>, _, _}=r|rest] ->
-        {tokens, context} = __parse__(rest, context)
-        __parse__([l,r|tokens], context)
+        __parse__([l,r|__parse__(rest)])
       [l, {:<=, _, _}=r|rest] ->
-        {tokens, context} = __parse__(rest, context)
-        __parse__([l,r|tokens], context)
+        __parse__([l,r|__parse__(rest)])
       [l, {:>=, _, _}=r|rest] ->
-        {tokens, context} = __parse__(rest, context)
-        __parse__([l,r|tokens], context)
+        __parse__([l,r|__parse__(rest)])
 
-      [{_, _, _}=l, {t=:"::", m, []=a}, {_, _, _}=r, {bt=:bracket, bm, ba=[]}|rest] ->
-        token = {t, m, [l,{bt, bm, [r|ba]}|a]}
-        __parse__([token|rest], resolve_binding(token, context))
+      [{_, _, _}=l, {t=:"::", m, []=a}, {_, _, _}=r, {bt=:bracket, bm, ba=[]}|rest] -> __parse__([{t, m, [l,{bt, bm, [r|ba]}|a]}|rest])
 
-      [{_, _, _}=l, {t=:"::", m, []=a}, {_, _, _}=r|rest]  ->
-        token = {t, m, [l,r|a]}
-        __parse__([token|rest], resolve_binding(token, context))
+      [{_, _, _}=l, {t=:"::", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
 
-      [{_, _, _}=l, {t=:as, m, []=a}, {_, _, _}=r|rest] -> __parse__([{t, m, [l,r|a]}|rest], context)
+      [{_, _, _}=l, {t=:"||", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
 
-      [{tl, _, _}=l, {t=:notnull, m, []=a}|rest] when tl in @literal -> __parse__([{t, m, [l|a]}|rest], context)
-      [{tl, _, _}=l, {t=:isnull, m, []=a}|rest] when tl in @literal -> __parse__([{t, m, [l|a]}|rest], context)
-      [{tl, _, _}=l, {t=:in, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:like, m, []=a}, {ll, _, _}=lll, {et=:escape, em, []=ea}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [l,{et, em, [lll, r|ea]}|a]}|rest], context)
-      [{tl, _, _}=l, {t=:ilike, m, []=a}, {ll, _, _}=lll, {et=:escape, em, []=ea}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [l,{et, em, [lll, r|ea]}|a]}|rest], context)
+      [{_, _, _}=l, {t=:as, m, []=a}, {_, _, _}=r|rest] -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:over, m, []=a}, {_, _, _}=r|rest] -> __parse__([{t, m, [l,r|a]}|rest])
 
-      [{tl, _, _}=l, {t=:like, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:ilike, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
+      [{tl, _, _}=l, {t=:notnull, m, []=a}|rest] when tl in @literal -> __parse__([{t, m, [l|a]}|rest])
+      [{tl, _, _}=l, {t=:isnull, m, []=a}|rest] when tl in @literal -> __parse__([{t, m, [l|a]}|rest])
+      [{tl, _, _}=l, {t=:in, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, _}=l, {t=:like, m, []=a}, {ll, _, _}=lll, {et=:escape, em, []=ea}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [l,{et, em, [lll, r|ea]}|a]}|rest])
+      [{tl, _, _}=l, {t=:ilike, m, []=a}, {ll, _, _}=lll, {et=:escape, em, []=ea}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [l,{et, em, [lll, r|ea]}|a]}|rest])
 
-      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:like, m, []=a}, {ll, _, _}=lll, {et=:escape, em, []=ea}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},{et, em, [lll, r|ea]}|a]}|rest], context)
-      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:ilike, m, []=a}, {ll, _, _}=lll, {et=:escape, em, []=ea}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},{et, em, [lll, r|ea]}|a]}|rest], context)
-      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:in, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest], context)
-      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:like, m, []=a}, {tr, _, _}=r|rest] when  tl in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest], context)
-      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:ilike, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest], context)
+      [{tl, _, _}=l, {t=:like, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, _}=l, {t=:ilike, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [l,r|a]}|rest])
+
+      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:like, m, []=a}, {ll, _, _}=lll, {et=:escape, em, []=ea}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},{et, em, [lll, r|ea]}|a]}|rest])
+      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:ilike, m, []=a}, {ll, _, _}=lll, {et=:escape, em, []=ea}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},{et, em, [lll, r|ea]}|a]}|rest])
+      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:in, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest])
+      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:like, m, []=a}, {tr, _, _}=r|rest] when  tl in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest])
+      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:ilike, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest])
 
 
-      [{tl, _, _}=l, {t=:is, m, []=a}, {false, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:is, m, []=a}, {true, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:is, m, []=a}, {:null, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:is, m, []=a}, {:unknown, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:is, m, []=a}, {:binding, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest], context)
-      [{tl, _, _}=l, {t=:is, m, []=a}, {nt=:not, nm, []=na}, {:distinct=d,dm,[]=da}, {:from=f,fm,[]=fa}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [l, {nt, nm, [{d,dm,[{f,fm,[r|fa]}|da]}|na]}|a]}|rest], context)
-      [{tl, _, _}=l, {t=:is, m, []=a}, {:distinct=d,dm,[]=da}, {:from=f,fm,[]=fa}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [l,{d,dm,[{f,fm,[r|fa]}|da]}|a]}|rest], context)
-      [{tl, _, _}=l, {t=:between, m, []=a}, {:asymmetric=d,dm,[]=da}, {ll, _, _}=lll, {:and=aa,am,[]=aaa}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [l, {d,dm,[{aa,am,[lll,r|aaa]}|da]}|a]}|rest], context)
-      [{tl, _, _}=l, {t=:between, m, []=a}, {:symmetric=d,dm,[]=da}, {ll, _, _}=lll, {:and=aa,am,[]=aaa}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [l, {d,dm,[{aa,am,[lll,r|aaa]}|da]}|a]}|rest], context)
-      [{tl, _, _}=l, {t=:between, m, []=a}, {ll, _, _}=lll, {:and=aa,am,[]=aaa}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [l, {aa,am,[lll,r|aaa]}|a]}|rest], context)
+      [{tl, _, _}=l, {t=:is, m, []=a}, {false, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, _}=l, {t=:is, m, []=a}, {true, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, _}=l, {t=:is, m, []=a}, {:null, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, _}=l, {t=:is, m, []=a}, {:unknown, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, _}=l, {t=:is, m, []=a}, {:binding, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, _}=l, {t=:is, m, []=a}, {nt=:not, nm, []=na}, {:distinct=d,dm,[]=da}, {:from=f,fm,[]=fa}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [l, {nt, nm, [{d,dm,[{f,fm,[r|fa]}|da]}|na]}|a]}|rest])
+      [{tl, _, _}=l, {t=:is, m, []=a}, {:distinct=d,dm,[]=da}, {:from=f,fm,[]=fa}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [l,{d,dm,[{f,fm,[r|fa]}|da]}|a]}|rest])
+      [{tl, _, _}=l, {t=:between, m, []=a}, {:asymmetric=d,dm,[]=da}, {ll, _, _}=lll, {:and=aa,am,[]=aaa}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [l, {d,dm,[{aa,am,[lll,r|aaa]}|da]}|a]}|rest])
+      [{tl, _, _}=l, {t=:between, m, []=a}, {:symmetric=d,dm,[]=da}, {ll, _, _}=lll, {:and=aa,am,[]=aaa}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [l, {d,dm,[{aa,am,[lll,r|aaa]}|da]}|a]}|rest])
+      [{tl, _, _}=l, {t=:between, m, []=a}, {ll, _, _}=lll, {:and=aa,am,[]=aaa}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [l, {aa,am,[lll,r|aaa]}|a]}|rest])
 
-      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:in, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest], context)
-      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:is, m, []=a}, {false, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest], context)
-      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:is, m, []=a}, {true, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest], context)
-      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:is, m, []=a}, {:null, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest], context)
-      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:is, m, []=a}, {:unknown, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest], context)
-      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:is, m, []=a}, {:binding, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest], context)
+      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:in, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest])
+      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:is, m, []=a}, {false, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest])
+      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:is, m, []=a}, {true, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest])
+      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:is, m, []=a}, {:null, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest])
+      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:is, m, []=a}, {:unknown, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest])
+      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:is, m, []=a}, {:binding, _, _}=r|rest] when tl in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest])
 
-      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:between, m, []=a}, {:asymmetric=d,dm,[]=da}, {ll, _, _}=lll, {:and=aa,am,[]=aaa}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]}, {d,dm,[{aa,am,[lll,r|aaa]}|da]}|a]}|rest], context)
-      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:between, m, []=a}, {:symmetric=d,dm,[]=da}, {ll, _, _}=lll, {:and=aa,am,[]=aaa}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]}, {d,dm,[{aa,am,[lll,r|aaa]}|da]}|a]}|rest], context)
-      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:between, m, []=a}, {ll, _, _}=lll, {:and=aa,am,[]=aaa}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]}, {aa,am,[lll,r|aaa]}|a]}|rest], context)
+      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:between, m, []=a}, {:asymmetric=d,dm,[]=da}, {ll, _, _}=lll, {:and=aa,am,[]=aaa}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]}, {d,dm,[{aa,am,[lll,r|aaa]}|da]}|a]}|rest])
+      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:between, m, []=a}, {:symmetric=d,dm,[]=da}, {ll, _, _}=lll, {:and=aa,am,[]=aaa}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]}, {d,dm,[{aa,am,[lll,r|aaa]}|da]}|a]}|rest])
+      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:between, m, []=a}, {ll, _, _}=lll, {:and=aa,am,[]=aaa}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]}, {aa,am,[lll,r|aaa]}|a]}|rest])
 
-      [{t=:array, m, []=a}, {:bracket, _, _}=r|rest] -> __parse__([{t, m, [r|a]}|rest], context)
+      [{t=:array, m, []=a}, {:bracket, _, _}=r|rest] -> __parse__([{t, m, [r|a]}|rest])
 
-      [{_,[_,{_, :literal}|_],a}=l,{_,[_,{_, :literal}|_],as}=r|rest] -> __parse__([{:as, [], [l,r]}|rest], %{context | aliases: [{as, a}|context.aliases]})
-      [{:dot, _, [{:ident, _, schema}, {:ident, _, table}]}=l, {:ident, _, as}=r|rest] ->  __parse__([{:as, [], [l,r]}|rest], %{context | aliases: [{as, [schema, table]}|context.aliases]})
-      [{:ident, _, a}=l, {:ident, _, as}=r|rest] -> __parse__([{:as, [], [l,r]}|rest], %{context | aliases: [{as, a}|context.aliases]})
+      [{_,[_,{_, :literal}|_],_}=l,{_,[_,{_, :literal}|_],_}=r|rest] -> __parse__([{:as, [], [l,r]}|rest])
+      [{:dot, _, _}=l, {:ident, _, _}=r|rest] ->  __parse__([{:as, [], [l,r]}|rest])
+      [{:ident, _, _}=l, {:ident, _, _}=r|rest] -> __parse__([{:as, [], [l,r]}|rest])
 
-      tokens -> {tokens, context}
+      tokens -> tokens
     end
   end
 
-  defp resolve_binding({:"::", _, [{:binding, _, [idx]}, right]}, context) do
-    %{context|types: List.insert_at(context.types, idx, resolve_column(right, [], [], context))}
-  end
-  defp resolve_binding(_tokens, context) do
-    context
-  end
-
-  @order %{delete: 0, update: 0, select: 0, set: 1, from: 1, join: 2, left: 2, right: 2, inner: 2, natural: 2, full: 2, cross: 2, where: 3, group: 4, having: 5, window: 6, order: 7, limit: 8, offset: 9, fetch: 10, returning: 11}
+  @order %{insert: 0, delete: 0, update: 0, select: 0, set: 1, from: 1, join: 2, left: 2, right: 2, inner: 2, natural: 2, full: 2, cross: 2, where: 3, group: 4, having: 5, window: 6, order: 7, limit: 8, offset: 9, fetch: 10, returning: 11}
   defp sort(acc), do: Enum.sort_by(acc, fn {tag, _, _} -> Map.get(@order, tag) end, :asc)
 
   defp validate(_, %{validate: nil}, errors), do: errors
-  defp validate({tag, _, values}, %{validate: fun}, errors) when tag in ~w[select set having where on by order group returning]a do
+  defp validate({tag, _, values}, %{validate: fun}, errors) when tag in ~w[select set having where on by order group returning insert into]a do
     case validate_columns(fun, values, []) do
       [] -> errors
       e -> e++errors
@@ -398,105 +378,230 @@ defmodule SQL.Parser do
   end
   defp validate_columns(_fun, _, acc), do: acc
 
-  defp description(tokens, context, columns) do
-    from = elem(Enum.find(tokens, {[], [], []}, &(is_tuple(&1) && elem(&1, 0) in ~w[from update delete]a)), 2)
-    description = case resolve_column(Enum.find(tokens, {[], [], []}, &(is_tuple(&1) && elem(&1, 0) in ~w[select returning]a)), from, columns, context) do
-      {:record, values} -> values
-      values -> values
-    end
-    %{context | description: description}
+  defp description([{tag, _, [left, right]}|_rest], columns, types, froms, select, bindings) when tag in ~w[except intersect union]a do
+    left = description(List.wrap(left), columns, types, froms, select, bindings)
+    right = description(List.wrap(right), columns, types, froms, select, bindings)
+    if left == right, do: left, else: right
+  end
+  defp description([{:paren, _, [[_|_]=values]}|rest], columns, types, froms, select, bindings) do
+    description(values++rest, columns, types, froms, select, bindings)
+  end
+  defp description([{tag, _, _}=node|rest], columns, types, froms, select, bindings) when tag in ~w[insert from update inner outer left right full natural cross join]a do
+    description(rest, columns, types, [node|froms], select, [node|bindings])
+  end
+  defp description([{tag, _, _}=node|rest], columns, types, froms, select, bindings) when tag in ~w[select returning]a do
+    description(rest, columns, types, froms, [node|select], [node|bindings])
+  end
+  defp description([{_, _, _}=node|rest], columns, types, froms, select, bindings) do
+    description(rest, columns, types, froms, select, [node|bindings])
+  end
+  defp description([[{_, _, _}|_]=rest], columns, types, froms, select, bindings) do
+    description(rest, columns, types, froms, select, bindings)
+  end
+  defp description([], columns, types, []=aliases, [], bindings) do
+    {[], aliases, resolve_binding(Enum.reverse(bindings), aliases, columns, types)}
+  end
+  defp description([], columns, types, froms, select, bindings) do
+    aliases = resolve_aliases(froms, columns, [])
+    types = resolve_binding(Enum.reverse(bindings), aliases, columns, types)
+    description = resolve_description(select, aliases, columns, [])
+    {description, aliases, types}
   end
 
-  defp resolve_column({:*, _, []}, from, columns, context), do: Enum.map(from, &expand_star(&1, columns, context))
-  defp resolve_column({:dot, _, [left, right]}, from, columns, context), do: [resolve_column(left, from, columns, context), resolve_column(right, from, columns, context)]
-  defp resolve_column({:paren, _, [left|_]}, from, columns, context), do: resolve_column(left, from, columns, context)
-  defp resolve_column({:=, _, [left, right]}, from, columns, context), do: {:bool, resolve_column(left, from, columns, context) || resolve_column(right, from, columns, context)}
-  defp resolve_column({:coalesce, _, [{:paren, _, [left, right]}]}, from, columns, context), do: resolve_column(left, from, columns, context) || resolve_column(right, from, columns, context)
-  defp resolve_column({tag, _, [type|_]}, from, columns, context) when tag in ~w[array_agg bracket]a, do: {:array, resolve_column(type, from, columns, context)}
-  defp resolve_column({:array, _, [type]}, from, columns, context), do: resolve_column(type, from, columns, context)
-  defp resolve_column({:quote, _, _}, _from, _columns, _context), do: :text
-  defp resolve_column({:null=type, _, _}, _from, _columns, _context), do: type
-  defp resolve_column({:hstore=type, _, _}, _from, _columns, _context), do: type
-  defp resolve_column({tag, _, _}, _from, _columns, _context) when tag in ~w[true false]a, do: :bool
-  defp resolve_column({tag, _, _}, _from, _columns, _context) when tag in ~w[numeric avg - + *]a, do: :numeric
-  defp resolve_column({:select, _, [{:ident, _, _}, {:paren, _, _}]}, _from, _columns, _context) do
+  defp resolve_description([], _aliases, _columns, []=acc), do: acc
+  defp resolve_description([], _aliases, _columns, acc), do: List.last(acc)
+  defp resolve_description([node|rest], aliases, columns, acc) do
+    resolve_description(rest, aliases, columns, [resolve_desc(node, columns, aliases)|acc])
+  end
+
+  defp resolve_desc({:select, _, [{:distinct, _, _}|values]}, columns, aliases) do
+    resolve_desc(values, aliases, columns, [])
+  end
+  defp resolve_desc({tag, _, values}, columns, aliases) when tag in ~w[select returning]a do
+    resolve_desc(values, aliases, columns, [])
+  end
+  defp resolve_desc([], _aliases, _columns, acc), do: Enum.reverse(acc)
+  defp resolve_desc([{:*, _, []}], aliases, _columns, []), do: Enum.flat_map(aliases, fn {_, [value]} ->
+    case elem(value, tuple_size(value)-1) do
+      [{_, [_|_]=cols}] -> cols
+      cols -> cols
+    end
+  end)
+  defp resolve_desc([{:comma, _, [node]}|rest], aliases, columns, acc) do
+    resolve_desc(rest, aliases, columns, [resolve_column(node, aliases, columns)|acc])
+  end
+  defp resolve_desc([{_,_,_}=node|rest], aliases, columns, acc) do
+    resolve_desc(rest, aliases, columns, [resolve_column(node, aliases, columns)|acc])
+  end
+
+  defp find_column([], _column), do: nil
+  defp find_column([{_, column}=type|_], column), do: type
+  defp find_column([_|rest], column), do: find_column(rest, column)
+
+  defp columns(_table, []=columns), do: columns
+  defp columns(_table, [from: _values]) do
+    []
+  end
+  defp columns(table, columns) do
+    table = "#{table}"
+    columns
+    |> Enum.filter(&(&1.table_name == table))
+    |> Enum.sort_by(& &1.ordinal_position)
+    |> Enum.map(fn col -> {:"#{col.udt_name}", :"#{col.column_name}"} end)
+  end
+
+  defp columns(_schema, _table, []=columns), do: columns
+  defp columns(schema, table, columns) do
+    schema = "#{schema}"
+    table = "#{table}"
+    columns
+    |> Enum.filter(&(&1.table_schema == schema and &1.table_name == table))
+    |> Enum.sort_by(& &1.ordinal_position)
+    |> Enum.map(fn col -> {:"#{col.udt_name}", :"#{col.column_name}"} end)
+  end
+
+  defp resolve_aliases([{tag, _, value}|rest], columns, aliases) when tag in ~w[insert from update delete inner outer left right full natural cross join]a do
+    resolve_aliases(rest, columns, [{tag, resolve_aliases(value, columns, [])}|aliases])
+  end
+  defp resolve_aliases([{:into, _, [{:ident,_,table}|_]}|rest], columns, aliases) do
+    resolve_aliases(rest, columns, [{:"#{table}", columns(table, columns)}|aliases])
+  end
+  defp resolve_aliases([{:as, _, [{:ident,_,table},{:ident,_,as}]}|rest], columns, aliases) do
+    resolve_aliases(rest, columns, [{:"#{table}", :"#{as}", columns(table, columns)}|aliases])
+  end
+  defp resolve_aliases([{:as, _, [{:dot,_,[{:ident,_,schema},{:ident,_,table}]},{:ident,_,as}]}|rest], columns, aliases) do
+    resolve_aliases(rest, columns, [{:"#{schema}", :"#{table}", :"#{as}", columns(schema, table, columns)}|aliases])
+  end
+  defp resolve_aliases([{:ident,_,table}|rest], columns, aliases) do
+    resolve_aliases(rest, columns, [{:"#{table}", columns(table, columns)}|aliases])
+  end
+  defp resolve_aliases([{:dot,_,[{:ident,_,schema},{:ident,_,table}]}|rest], columns, aliases) do
+    resolve_aliases(rest, columns, [{:"#{schema}", :"#{table}", columns(schema, table, columns)}|aliases])
+  end
+  defp resolve_aliases([{:paren,_, _value}, {:ident,_,as}|rest], columns, aliases) do
+    resolve_aliases(rest, columns, [{:"#{as}", []}|aliases])
+  end
+  defp resolve_aliases([{:paren,_, _value}|rest], columns, aliases) do
+    resolve_aliases(rest, columns, [{:paren, []}|aliases])
+  end
+  defp resolve_aliases([_|rest], columns, aliases) do
+    resolve_aliases(rest, columns, aliases)
+  end
+  defp resolve_aliases([], _columns, aliases), do: aliases
+
+
+  defp resolve_type([{tag, values}|rest], column, prospect) when tag in ~w[from join update]a do
+    resolve_type(rest, column, Enum.flat_map(values, &List.wrap(find_column(elem(&1, tuple_size(&1)-1), column)))++prospect)
+  end
+  defp resolve_type([{_tag, values}|rest], column, prospect) do
+    resolve_type(rest, column, resolve_type(values, column, prospect))
+  end
+  defp resolve_type([], _column, prospect), do: prospect
+
+
+  defp resolve_binding([], [], types), do: types
+  defp resolve_binding([{:binding, _, [idx]}|values], [{type, _col}|aliases], types) do
+    resolve_binding(values, aliases, List.insert_at(types, idx, type))
+  end
+  defp resolve_binding([{:comma, _, [{:binding, _, [idx]}]}|values], [{type, _col}|aliases], types) do
+    resolve_binding(values, aliases, List.insert_at(types, idx, type))
+  end
+  defp resolve_binding([_|values], [_|aliases], types) do
+    resolve_binding(values, aliases, types)
+  end
+
+
+  defp resolve_binding([{:into, _, [_, {:paren,_, c}, {:values,_,[{:paren, _, values}]}]}|rest], [insert: [insert]]=aliases, columns, types) do
+    resolve_binding(rest, aliases, columns, resolve_binding(values, resolve_values(c, elem(insert, tuple_size(insert)-1), []), types))
+  end
+  defp resolve_binding([{_, _, [{:binding, _, [idx]}, right]}|rest], aliases, columns, types) do
+    resolve_binding(rest, aliases, columns, List.insert_at(types, idx, type(right, aliases)))
+  end
+  defp resolve_binding([{_, _, [left, {:binding, _, [idx]}]}|rest], aliases, columns, types) do
+    resolve_binding(rest, aliases, columns, List.insert_at(types, idx, type(left, aliases)))
+  end
+  defp resolve_binding([{_, _, [{_, _, _}|_]=value}|rest], aliases, columns, types) do
+    resolve_binding(rest, aliases, columns, resolve_binding(value, aliases, columns, types))
+  end
+  defp resolve_binding([{_, _, _}|rest], aliases, columns, types) do
+    resolve_binding(rest, aliases, columns, types)
+  end
+  defp resolve_binding([], _aliases, _columns, types) do
+    types
+  end
+
+  defp resolve_values([], _columns, acc), do: Enum.reverse(acc)
+  defp resolve_values([{:ident, _, ident}|rest], columns, acc) do
+    resolve_values(rest, columns, [find_column(columns, :"#{ident}")|acc])
+  end
+  defp resolve_values([{:comma, _, [{:ident, _, ident}]}|rest], columns, acc) do
+    resolve_values(rest, columns, [find_column(columns, :"#{ident}")|acc])
+  end
+
+  defp type({:paren, _, [{:select, _, _}|_]}, aliases), do: {:record, aliases}
+  defp type({:over, _, [{:rank, _, _}, _]}, _aliases), do: :numeric
+  defp type({tag, _, [_, right]}, aliases) when tag in ~w[:: dot]a, do: type(right, aliases)
+  defp type({:array_agg, _, [type|_]}, aliases) do
+    case resolve_column(type, aliases, []) do
+      {type, _} -> {:array, type}
+      type -> {:array, type}
+    end
+  end
+  defp type({:bracket, _, [type|_]}, aliases), do: {:array, type(type, aliases)}
+  defp type({:quote, _, _}, _aliases), do: :text
+  defp type({tag, _, _}, _aliases) when tag in ~w[true false]a, do: :bool
+  defp type({tag, _, _}, _aliases) when tag in ~w[numeric avg - + *]a, do: :numeric
+  defp type({tag, _, _}, _aliases) when tag in ~w[null hstore]a, do: tag
+  defp type({:ident, _, ident}, aliases) do
+    col = :"#{ident}"
+    case resolve_type(aliases, col, []) do
+      [] -> col
+      type -> type
+    end
+  end
+
+  defp type({type, _, []}, _aliases), do: type
+  defp type({_, _, [{:paren, _, _}]}, _aliases), do: :void
+  defp type({_, _, _}, []=aliases), do: {:record, aliases}
+  defp type(_, _aliases), do: nil
+
+
+
+  defp column({:ident, _, col}, _aliases), do: :"#{col}"
+  defp column({col, _, []}, _aliases), do: col
+  defp column({:dot, _, [_, right]}, aliases), do: column(right, aliases)
+  defp column({:comma, _, [right]}, aliases), do: column(right, aliases)
+  defp column({_tag, _, [{:paren, _, [left, right]}]}, aliases), do: column(left, aliases) || column(right, aliases)
+  defp column(_, _), do: nil
+
+
+  defp resolve_column({:as, _, [left, right]}, aliases, _columns), do: {type(left, aliases), column(right, aliases)}
+  defp resolve_column({:"::", _, [{:paren, _, _} = _left, {:dot, _, [{:ident, _, schema}, {:ident, _, table}]}]}, aliases, _columns), do: columns(schema, table, aliases)
+  defp resolve_column({:"::", _, [{t, _, _}, right]}, aliases, _columns) when t in ~w[binding paren numeric quote]a, do: {type(right, aliases), nil}
+  defp resolve_column({:"::", _, [left, right]}, aliases, _columns), do: {type(right, aliases), column(left, aliases)}
+  defp resolve_column({:dot, _, [{:dot, _, [{:ident, _, schema}, {:ident, _, table}]}, {:*, _, []}]}, aliases, _columns), do: columns(schema, table, aliases)
+  defp resolve_column({:dot, _, [{:ident, _, table}, {:*, _, []}]}, aliases, _columns), do: columns(table, aliases)
+  defp resolve_column({:=, _, [left, right]}, aliases, _columns), do: {:bool, column(left, aliases) || column(right, aliases)}
+  defp resolve_column({:coalesce, _, [{:paren, _, [left, right]}]}, aliases, _columns), do: column(left, aliases) || column(right, aliases)
+  defp resolve_column({tag, _, [type|_]}, aliases, columns) when tag in ~w[array_agg bracket]a, do: {:array, resolve_column(type, aliases, columns)}
+  defp resolve_column({:array, _, [type]}, aliases, columns), do: resolve_column(type, aliases, columns)
+  defp resolve_column({:paren, _, [{:select, _, _}|_] = values}, aliases, columns) do
+    {:record, resolve_desc(values, aliases, columns, [])}
+  end
+
+  defp resolve_column({:paren, _, [left|_]}, aliases, columns), do: resolve_column(left, aliases, columns)
+  defp resolve_column({:select, _, [{:ident, _, _}, {:paren, _, _}]}, _aliases, _columns) do
     {:record, [:void]}
   end
-  defp resolve_column({:select, _, values}, from, columns, context) do
-    {:record, List.flatten(Enum.map(values, &resolve_column(&1, from, columns, context)))}
+  defp resolve_column({:row, _, [{:paren, _, values}]}, aliases, columns) do
+    {:record, resolve_desc(values, aliases, columns, [])}
   end
-  defp resolve_column({:returning, _, values}, from, columns, context) do
-    {:record, List.flatten(Enum.map(values, &resolve_column(&1, from, columns, context)))}
-  end
-  defp resolve_column({:row, _, [{:paren, _, values}]}, from, columns, context) do
-    {:record, Enum.map(values, &resolve_column(&1, from, columns, context))}
-  end
-  defp resolve_column({:comma, _, [col]}, from, columns, context), do:
-    resolve_column(col, from, columns, context)
-  defp resolve_column({:as, _, [left, right]}, from, columns, context) do
-    case resolve_column(left, from, columns, context) do
-      {type, {t, _col}} -> {{type, t}, resolve_column(right, from, columns, context)}
-      {type, _col} -> {type, resolve_column(right, from, columns, context)}
-      type -> {type, resolve_column(right, from, columns, context)}
+  defp resolve_column(node, aliases, _columns) do
+    type = type(node, aliases)
+    column = column(node, aliases)
+    case type == column do
+      true -> {nil, column}
+      false -> {type, column}
     end
-  end
-  defp resolve_column({:"::", _, [{t, _, _}, {:ident, _, tag}]}, _from, _columns, _context) when t in ~w[binding paren numeric quote]a, do: {:"#{tag}", nil}
-  defp resolve_column({:"::", _, [{:quote, _, _}, {:bracket, _, [{:ident, _, tag}]}]}, _from, _columns, _context), do: {{:array, :"#{tag}"}, nil}
-  defp resolve_column({:"::", _, [left, {:ident, _, value}]}, from, columns, context) do
-    case Enum.find(context.aliases, fn {name, _} -> name == value end) do
-      {^value, [{:ident, _, schema}, {:ident, _, table}]} -> columns("#{schema}", "#{table}", columns)
-      nil ->
-      case resolve_column(left, from, columns, context) do
-        {:record, _col} = type -> type
-        {type, col} -> {type, col}
-        [_, col] -> {:"#{value}", col}
-        type -> {:"#{value}", type}
-      end
-    end
-  end
-  defp resolve_column({:"::", _, [_left, right]}, from, columns, context) do
-    case resolve_column(right, from, columns, context) do
-      [schema, table] -> {:record, columns("#{schema}", "#{table}", columns)}
-      value -> {value, nil}
-    end
-  end
-  defp resolve_column({:ident, _, ident}, _from, columns, context) do
-    case Enum.find(context.aliases, fn {name, _} -> name == ident end)  do
-      {_, {schema, table}} -> columns("#{schema}", "#{table}", columns)
-      {_, alias} -> columns("#{alias}", columns)
-      nil -> :"#{ident}"
-    end
-  end
-  defp resolve_column({type, _, _}, _from, _columns, _context), do: type
-
-  defp expand_star({:comma, _, [col]},  columns, context), do: expand_star(col, columns, context)
-  defp expand_star({:as, _, [left, _alias]}, columns, context) do
-    expand_star(left, columns, context)
-  end
-  defp expand_star({:dot, _, [{:ident, _, schema}, {:ident, _, table}]}, columns, _context) do
-    columns("#{schema}", "#{table}", columns)
-  end
-  defp expand_star({:dot, _, [{:double_quote, _, schema}, {:double_quote, _, table}]}, columns, _context) do
-    columns("#{schema}", "#{table}", columns)
-  end
-  defp expand_star({:dot, _, [{:bracket, _, [{:ident, _, schema}]}, {:bracket, _, [{:ident, _, table}]}]}, columns, _context) do
-    columns("#{schema}", "#{table}", columns)
-  end
-  defp expand_star({:ident, _, table}, columns, _context) do
-    columns("#{table}", columns)
-  end
-
-  defp columns(table, columns) do
-    columns
-    |> Enum.filter(&(&1.table_name == "#{table}"))
-    |> Enum.sort_by(& &1.ordinal_position)
-    |> Enum.map(fn col -> {:"#{col.udt_name}", :"#{col.column_name}"} end)
-  end
-
-  defp columns(schema, table, columns) do
-    columns
-    |> Enum.filter(&(&1.table_schema == "#{schema}" and &1.table_name == "#{table}"))
-    |> Enum.sort_by(& &1.ordinal_position)
-    |> Enum.map(fn col -> {:"#{col.udt_name}", :"#{col.column_name}"} end)
   end
 end

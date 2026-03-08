@@ -5,12 +5,12 @@ defmodule SQLTest do
   use ExUnit.Case, async: true
   import SQL
 
-  def from(var \\ "users") do
-    ~SQL[from {{var}} u]
+  def from(sql \\ ~SQL"") do
+     sql |> ~SQL[from users u]
   end
 
   def where(sql, var \\ "john@example.com") do
-    sql |> ~SQL[where u.email = {{var}}]
+    sql |> ~SQL[where u.email::text = {{var}}]
   end
 
   describe "composable" do
@@ -27,22 +27,20 @@ defmodule SQLTest do
       |> ~SQL[select id, email, inserted_at, updated_at]
       |> where()
 
-      assert ["users", "john@example.com"] = sql.params
-      assert " select id, email, inserted_at, updated_at from ? u where u.email = ?" == to_string(sql)
+      assert ["john@example.com"] = sql.params
+      assert " select id, email, inserted_at, updated_at from users u where u.email::text = ?" == to_string(sql)
     end
   end
 
   test "map/2" do
-    columns = ~w[id email inserted_at updated_at]a
     sql =
     from()
     |> ~SQL[select id, email, inserted_at, updated_at]
     |> where()
     |> SQL.map(fn row -> row end)
-    |> SQL.map(fn row -> Map.new(Enum.zip(columns, row)) end)
-    |> SQL.map(&(&1.id))
+    |> SQL.map(&(&1[:id]))
 
-    assert ["id"] == Enum.map([["id", "email", "inserted_at", "updated_at"]], fn row -> sql.fn.(row) end)
+    assert ["id"] == Enum.map([[id: "id", email: "email", inserted_at: "inserted_at", updated_at: "updated_at"]], fn row -> sql.fn.(row) end)
   end
 
 
@@ -425,7 +423,7 @@ defmodule SQLTest do
     test "mixin" do
       for email <- ["1@example.com", "2@example.com", "3@example.com"] do
         sql = from() |> ~SQL[select id, email, inserted_at, updated_at] |> where(email)
-        assert {" select id, email, inserted_at, updated_at from ? u where u.email = ?", ["users", email]} == SQL.to_sql(sql)
+        assert {" select id, email, inserted_at, updated_at from users u where u.email::text = ?", [email]} == SQL.to_sql(sql)
       end
     end
   end

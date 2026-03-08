@@ -95,9 +95,16 @@ defmodule SQL.Integration.Postgres.Types do
 end
 
 defmodule SQL.Integration.PostgresTest do
-  use SQL.Case, async: true
+  use ExUnit.Case, async: true
   use SQL, adapter: SQL.Adapters.Postgres
   alias SQL.Integration.Postgres.Types
+
+
+  setup tags do
+    SQL.begin(tags.test)
+    on_exit(fn -> SQL.rollback(tags.test) end)
+  end
+
   @moduletag :integration
   describe "data types" do
     for type <- Types.list() do
