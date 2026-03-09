@@ -13,12 +13,12 @@ defmodule Mix.Tasks.Sql.Get do
     Application.load(app)
     Mix.Task.run("app.config", args)
     Application.ensure_all_started(:sql, :permanent)
-    create_file("sql.lock", gen_template(app), force: true)
+    create_file("sql.lock", gen_template(), force: true)
   end
 
-  def gen_template(app \\ :sql) do
+  def gen_template() do
     Application.ensure_all_started(:sql, :permanent)
-    lock_template(lock: Enum.reduce(Application.get_env(app, :pools), [], &(get(&1)++&2)))
+    lock_template(lock: Enum.reduce(Application.get_env(:sql, :pools), [], &(get(&1)++&2)))
   end
 
   def get({name, %{adapter: SQL.Adapters.Postgres}}) do
