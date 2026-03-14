@@ -31,11 +31,8 @@ defmodule SQL.Token do
 
       {reserved, non_reserved, operators} = SQL.BNF.get_rules()
       for atom <- Enum.uniq(Enum.map(reserved++non_reserved++operators,&elem(&1, 0))) do
-        defp __to_iodata__(unquote(atom), _format, :lower, acc) do
-          [unquote("#{atom}")|acc]
-        end
-        defp __to_iodata__(unquote(atom), _format, :upper, acc) do
-          [unquote(String.upcase("#{atom}"))|acc]
+        defp __to_iodata__(unquote(atom), _format, case, acc) do
+          [if(case == :upper, do: unquote(String.upcase("#{atom}")), else: unquote("#{atom}"))|acc]
         end
       end
       defp __to_iodata__(:comma, _format, _case, acc) do

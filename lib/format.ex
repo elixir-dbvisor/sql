@@ -31,20 +31,15 @@ defmodule SQL.Format do
   defp pad([?\n|_]=acc), do: acc
   defp pad(acc), do: [?\n|acc]
 
+  defp color(true, string, acc), do: [@keyword, string, @reset | acc]
+  defp color(false, string, acc), do: [string | acc]
+
   newline = ~w[select from join where having window limit offset fetch when else end returning set]a
   {reserved, non_reserved, operators} = SQL.BNF.get_rules()
   for atom <- Enum.uniq(Enum.map(reserved++non_reserved++operators,&elem(&1, 0))), atom not in newline do
-    defp to_iodata(unquote(atom), true, _binding ,:lower, _errors, _indent, acc) do
-      [@keyword, unquote("#{atom}"), @reset|acc]
-    end
-    defp to_iodata(unquote(atom), true, _binding, :upper, _errors, _indent, acc) do
-     [@keyword, unquote(String.upcase("#{atom}")), @reset|acc]
-    end
-    defp to_iodata(unquote(atom), false, _binding ,:lower, _errors, _indent, acc) do
-      [unquote("#{atom}")|acc]
-    end
-    defp to_iodata(unquote(atom), false, _binding, :upper, _errors, _indent, acc) do
-     [unquote(String.upcase("#{atom}"))|acc]
+    defp to_iodata(unquote(atom), color, _binding, case, _errors, _indent, acc) do
+      string = if(case == :upper, do: unquote(String.upcase("#{atom}")), else: unquote("#{atom}"))
+      color(color, string, acc)
     end
   end
   for atom <- newline do
