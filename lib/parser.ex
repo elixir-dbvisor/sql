@@ -326,6 +326,15 @@ defmodule SQL.Parser do
     end
   end
 
+  @doc false
+  def collect_binding_indices(tokens), do: tokens |> do_collect_binding_indices([]) |> Enum.reverse()
+  defp do_collect_binding_indices({:binding, _, [idx]}, acc), do: [idx | acc]
+  defp do_collect_binding_indices({_, _, values}, acc) when is_list(values), do: do_collect_binding_indices(values, acc)
+  defp do_collect_binding_indices({_, _, _}, acc), do: acc
+  defp do_collect_binding_indices([token | rest], acc), do: do_collect_binding_indices(rest, do_collect_binding_indices(token, acc))
+  defp do_collect_binding_indices([], acc), do: acc
+  defp do_collect_binding_indices(_, acc), do: acc
+
   @order %{insert: 0, delete: 0, update: 0, select: 0, set: 1, from: 1, join: 2, left: 2, right: 2, inner: 2, natural: 2, full: 2, cross: 2, where: 3, group: 4, having: 5, window: 6, order: 7, limit: 8, offset: 9, fetch: 10, returning: 11}
   defp sort(acc), do: Enum.sort_by(acc, fn {tag, _, _} -> Map.get(@order, tag) end, :asc)
 

@@ -426,6 +426,31 @@ defmodule SQLTest do
         assert {" select id, email, inserted_at, updated_at from users u where u.email::text = ?", [email]} == SQL.to_sql(sql)
       end
     end
+
+    test "parameter order preserved when clauses are reordered" do
+      name = "alice"
+      min_age = 18
+
+      {sql, params} =
+        ~SQL[where name = {{name}} select id, {{min_age}} as threshold from users]
+        |> SQL.to_sql()
+
+      assert sql == " select id, ? as threshold from users where name = ?"
+      assert params == [min_age, name]
+    end
+
+    test "parameter order preserved with three params across reordered clauses" do
+      a = "first"
+      b = "second"
+      c = "third"
+
+      {sql, params} =
+        ~SQL[where x = {{a}} and y = {{b}} select {{c}} from t]
+        |> SQL.to_sql()
+
+      assert sql == " select ? from t where x = ? and y = ?"
+      assert params == [c, a, b]
+    end
   end
 
   describe "operators" do

@@ -237,6 +237,7 @@ defmodule SQL do
             # end
 
           params ->
+            params = reorder_params(params, tokens)
             quote bind_quoted: [params: params, sql: Macro.escape(sql), env: Macro.escape(env)] do
               portal = "p_#{:erlang.unique_integer([:positive])}"
               %{sql | params: cast_params(params, binding(), env, []), portal: portal, p_len: byte_size(portal)}
@@ -253,9 +254,10 @@ defmodule SQL do
             end)
           {:ok, context, tokens} = tokens(right, file, idx, sql.id, config)
           tokens = t++tokens
-          {context, string, inspect} = plan(tokens, %{context|validate: config.validate, module: config.adapter, types: context.types, format: :dynamic}, sql.id, stack, config)
+          {context, string, inspect, parsed_tokens} = plan(tokens, %{context|validate: config.validate, module: config.adapter, types: context.types, format: :dynamic}, sql.id, stack, config)
           portal = "p_#{:erlang.unique_integer([:positive])}"
-          %{sql | params: p++cast_params(context.binding, binding(), env, []), tokens: tokens, string: string, inspect: inspect, columns: context.description, c_len: length(context.description), portal: portal, p_len: byte_size(portal)}
+          reordered_binding = reorder_params(context.binding, parsed_tokens, idx)
+          %{sql | params: p++cast_params(reordered_binding, binding(), env, []), tokens: tokens, string: string, inspect: inspect, columns: context.description, c_len: length(context.description), portal: portal, p_len: byte_size(portal)}
         end
     end
   end
@@ -304,6 +306,29 @@ defmodule SQL do
   end
 
   @doc false
+  def reorder_params(binding, tokens, offset \\ 0)
+  def reorder_params(binding, _tokens, _offset) when length(binding) < 2, do: binding
+  def reorder_params(binding, tokens, offset) do
+    all_indices = SQL.Parser.collect_binding_indices(tokens)
+    output_order = if offset > 0 do
+      Enum.filter(all_indices, &(&1 > offset)) |> Enum.map(&(&1 - offset))
+    else
+      all_indices
+    end
+    if length(output_order) < 2 do
+      binding
+    else
+      identity = Enum.to_list(1..length(output_order))
+      if output_order == identity do
+        binding
+      else
+        original = Enum.reverse(binding)
+        Enum.map(Enum.reverse(output_order), fn idx -> Enum.at(original, idx - 1) end)
+      end
+    end
+  end
+
+  @doc false
   def cast_params([], _binding, _env, acc), do: acc
   def cast_params([q|params], binding, env, acc) when is_tuple(q) do
     {q, _, _} = Code.eval_quoted_with_env(q, binding, env)
@@ -331,7 +356,7 @@ defmodule SQL do
     case :persistent_term.get(key, nil) do
       nil ->
         {:ok, context, tokens} = SQL.Parser.parse(tokens, %{context|columns: List.wrap(config[:columns])})
-        format = {context, IO.iodata_to_binary(context.module.to_iodata(tokens, context)), __inspect__(tokens, context, stack)}
+        format = {context, IO.iodata_to_binary(context.module.to_iodata(tokens, context)), __inspect__(tokens, context, stack), tokens}
         :persistent_term.put(key, format)
         format
 
