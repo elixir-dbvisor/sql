@@ -12,6 +12,7 @@ defmodule SQL do
 
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
+      Application.ensure_all_started(:sql, :permanent)
       @doc false
       import SQL
       pool = opts[:pool] || :default
@@ -22,25 +23,15 @@ defmodule SQL do
                     %{validate: validate, columns: columns} <- elem(Code.eval_file("sql.lock", File.cwd!()), 0) do
                     %{config | validate: validate, columns: columns}
                else
-                _ ->
-                  %{validate: validate, columns: columns} = case :persistent_term.get(SQL.Lock, nil) do
-                    nil ->
-                      lock = Mix.Tasks.Sql.Get.gen_template()
-                      :persistent_term.put(SQL.Lock, lock)
-                      lock
-                    lock ->
-                      lock
-                  end
-                  |> Code.eval_string()
-                  |> elem(0)
-                  %{config | columns: columns}
+                _  ->
+                  %{config | columns: :persistent_term.get({pool, :columns})}
                end
       Module.put_attribute(__MODULE__, :sql_config, config)
       Module.put_attribute(__MODULE__, :sql_pool, pool)
     end
   end
 
-  defstruct [tokens: [], idx: 0, params: [], module: nil, id: nil, string: nil, inspect: nil, fn: nil, context: nil, name: nil, columns: [], c_len: 0, types: [], pool: :default, portal: nil, p_len: 0, timeout: nil, acc: nil]
+  defstruct [tokens: [], idx: 0, params: [], module: nil, id: nil, string: nil, inspect: nil, fn: nil, context: nil, name: nil, columns: [], c_len: 0, types: [], pool: :default, portal: nil, p_len: 0, timeout: nil, acc: nil, max_rows: 0]
 
   defimpl Inspect, for: SQL do
     def inspect(%{inspect: nil, tokens: tokens, context: context}, _opts) do
@@ -112,106 +103,115 @@ defmodule SQL do
   @doc since: "0.5.0"
   defmacro transaction(do: block) do
     key = __CALLER__.function
-    testing = Mix.env() == :test
-    pool = Module.get_attribute(__CALLER__.module, :sql_pool)
+    pool = Module.get_attribute(__CALLER__.module, :sql_pool, :default)
     quote do
+      caller = self()
       ref = make_ref()
-      state = if unquote(testing), do: :persistent_term.get(unquote(key), Process.get(SQL.Transaction)), else: Process.get(SQL.Transaction)
-      case state do
+      case :persistent_term.get(unquote(key), SQL.transaction()) do
         nil ->
-          owner = self()
           conn = conn(unquote(pool))
-          state = {owner, conn}
-          Process.put(SQL.Transaction, state)
-          commit = if unquote(testing) do
-            :persistent_term.put({SQL.Conn, owner}, state)
-            :persistent_term.put(unquote(key), state)
-            ~SQL[rollback]
-          else
-            ~SQL[commit]
-          end
-          send conn, {ref, owner, System.monotonic_time(), ~SQL[begin]}
+          Process.put(SQL.Transaction, {caller, conn})
+          send conn, {ref, caller, System.monotonic_time(), ~SQL[begin]}
           receive do
             {^ref, :begin} ->
               try do
                 result = unquote(block)
-                send conn, {ref, owner, System.monotonic_time(), commit}
+                send conn, {ref, caller, System.monotonic_time(), ~SQL[commit]}
                 Process.delete(SQL.Transaction)
                 result
               rescue
                 e ->
-                  send conn, {ref, owner, System.monotonic_time(), ~SQL[rollback]}
+                  send conn, {ref, caller, System.monotonic_time(), ~SQL[rollback]}
                   Process.delete(SQL.Transaction)
                   {:error, e}
-                  reraise e, __STACKTRACE__
               end
           end
         {owner, conn} = state ->
-          if unquote(testing), do: Process.put(SQL.Transaction, state)
           id = "sp_#{:erlang.unique_integer([:positive])}"
-          send conn, {ref, owner, System.monotonic_time(), parse("savepoint #{id}")}
+          send conn, {owner, {ref, caller, System.monotonic_time(), parse("savepoint #{id}")}}
           receive do
             {^ref, :begin} ->
               try do
                 result = unquote(block)
-                send conn, {ref, owner, System.monotonic_time(), parse("release savepoint #{id}")}
+                send conn, {owner, {ref, caller, System.monotonic_time(), parse("release savepoint #{id}")}}
                 result
               rescue
                 e ->
-                send conn, {ref, owner, System.monotonic_time(), parse("rollback to savepoint #{id}")}
+                send conn, {owner, {ref, caller, System.monotonic_time(), parse("rollback to savepoint #{id}")}}
                 {:error, e}
-                reraise e, __STACKTRACE__
               end
           end
       end
     end
   end
 
-  # if Mix.env() == :test do
-    @doc false
-    @doc since: "0.5.0"
-    defmacro begin(key \\ __CALLER__.function, pool \\ Module.get_attribute(__CALLER__.module, :sql_pool)) do
-      quote do
-        ref = make_ref()
-        owner = self()
-        conn = conn(unquote(pool))
-        state = {owner, conn}
-        :persistent_term.put(unquote(key), state)
-        :persistent_term.put({SQL.Conn, owner}, state)
-        Process.put(SQL.Transaction, {owner, conn})
-        send conn, {ref, owner, System.monotonic_time(), ~SQL[begin]}
-        receive do
-          {^ref, :begin} -> :ok
-        end
+  @doc false
+  @doc since: "0.5.0"
+  defmacro begin(key \\ __CALLER__.function, pool \\ Module.get_attribute(__CALLER__.module, :sql_pool)) do
+    quote do
+      ref = make_ref()
+      owner = self()
+      conn = conn(unquote(pool))
+      state = {owner, conn}
+      :persistent_term.put({unquote(key), :ref}, ref)
+      :persistent_term.put(unquote(key), state)
+      :persistent_term.put({SQL.Conn, owner}, state)
+      Process.put(SQL.Transaction, {owner, conn})
+      send conn, {ref, owner, System.monotonic_time(), ~SQL[begin]}
+      receive do
+        {^ref, :begin} -> :ok
       end
     end
+  end
 
-    @doc false
-    @doc since: "0.5.0"
-    defmacro rollback(key \\ __CALLER__.function) do
-      quote do
-        {owner, conn} = :persistent_term.get(unquote(key), Process.get(SQL.Transaction))
-        send conn, {make_ref(), owner, System.monotonic_time(), ~SQL[rollback]}
-        Process.delete(SQL.Transaction)
-        :ok
-      end
+  @doc false
+  @doc since: "0.5.0"
+  defmacro rollback(key \\ __CALLER__.function) do
+    quote do
+      {owner, conn} = :persistent_term.get(unquote(key))
+      send conn, {:persistent_term.get({unquote(key), :ref}), owner, System.monotonic_time(), ~SQL[rollback]}
+      :persistent_term.erase({SQL.Conn, owner})
+      :persistent_term.erase(unquote(key))
+      :persistent_term.erase({unquote(key), :ref})
+      Process.delete(SQL.Transaction)
+      :ok
     end
-  # end
+  end
+
+  @doc false
+  @doc since: "0.5.0"
+  defmacro commit(key \\ __CALLER__.function) do
+    quote do
+      {owner, conn} = :persistent_term.get(unquote(key))
+      send conn, {:persistent_term.get({unquote(key), :ref}), owner, System.monotonic_time(), ~SQL[commit]}
+      :persistent_term.erase({SQL.Conn, owner})
+      :persistent_term.erase(unquote(key))
+      :persistent_term.erase({unquote(key), :ref})
+      Process.delete(SQL.Transaction)
+      :ok
+    end
+  end
+
+  @doc false
+  @doc since: "0.5.0"
+  def stream(%SQL{} = sql, max_rows: max_rows), do: %{sql | max_rows: max_rows}
 
   @doc false
   @doc since: "0.1.0"
-  def parse(binary, params \\ [], module \\ ANSI) do
+  def parse(binary, binding \\ [], module \\ ANSI) do
     {:ok, context, tokens} = SQL.Lexer.lex(binary)
     {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
+    {:ok, columns, c_len, types, params} = SQL.Parser.describe(tokens, [])
     id = :erlang.phash2(tokens)
     portal = "p_#{:erlang.unique_integer([:positive])}"
-    struct(SQL, id: id, name: "sql_#{id}", tokens: tokens, context: context, string: IO.iodata_to_binary(module.to_iodata(tokens, context)), idx: length(params), types: context.types, params: params, columns: context.description, c_len: length(context.description), portal: portal, p_len: byte_size(portal))
+    struct(SQL, id: id, name: "sql_#{id}", tokens: tokens, context: context, string: IO.iodata_to_binary(module.to_iodata(tokens, context)), types: types, params: eval(params, binding, __ENV__, []), columns: columns, c_len: c_len, portal: portal, p_len: byte_size(portal))
   end
 
   @doc false
   def build(left, {:<<>>, _, _} = right, _modifiers, env) do
     config = %{case: :lower, adapter: Application.get_env(:sql, :adapter, ANSI), validate: fn _, _ -> true end}
     config = if env.module, do: Module.get_attribute(env.module, :sql_config, config), else: config
+    columns = Map.get(config, :columns, [])
     sql = struct(SQL, module: env.module)
     stack = if env.function do
               {env.module, elem(env.function, 0), elem(env.function, 1), [file: Path.relative_to_cwd(env.file), line: env.line]}
@@ -222,41 +222,50 @@ defmodule SQL do
       {:static, data} ->
         id = id(data)
         {:ok, context, tokens} = SQL.Lexer.lex(data, env.file)
-        # %{context|validate: config.validate, module: config.adapter, case: config.case}
-        {:ok, context, tokens} = SQL.Parser.parse(tokens, %{context|validate: config.validate, module: config.adapter, case: config.case, columns: Map.get(config, :columns, [])})
+        {:ok, context, tokens} = SQL.Parser.parse(tokens, %{context|validate: config.validate, module: config.adapter, case: config.case})
+        {:ok, columns, c_len, types, params} = SQL.Parser.describe(tokens, columns)
         string = IO.iodata_to_binary(context.module.to_iodata(tokens, context))
         inspect = __inspect__(tokens, context, stack)
         portal = "p_#{:erlang.unique_integer([:positive])}"
-        sql = %{sql | name: "sql_#{id}", idx: context.idx, tokens: tokens, string: string, inspect: inspect, id: id, types: context.types, columns: context.description, c_len: length(context.description), portal: portal, p_len: byte_size(portal)}
+        sql = %{sql | name: "sql_#{id}", params: [], columns: columns, c_len: c_len, types: types, tokens: tokens, string: string, inspect: inspect, id: id, portal: portal, p_len: byte_size(portal)}
         case context.binding do
-          []     ->
-            Macro.escape(sql)
-            # quote bind_quoted: [sql: Macro.escape(sql)] do
-            #   portal = "p_#{:erlang.unique_integer([:positive])}"
-            #   %{sql | portal: portal, p_len: byte_size(portal)}
-            # end
-
-          params ->
+          0 -> Macro.escape(sql)
+          _ ->
             quote bind_quoted: [params: params, sql: Macro.escape(sql), env: Macro.escape(env)] do
               portal = "p_#{:erlang.unique_integer([:positive])}"
-              %{sql | params: cast_params(params, binding(), env, []), portal: portal, p_len: byte_size(portal)}
+              %{sql | params: eval(params, binding(), env, sql.params), portal: portal, p_len: byte_size(portal)}
             end
         end
 
       {:dynamic, data} ->
         id = id(data)
         sql = %{sql | id: id, name: "sql_#{id}"}
-        quote bind_quoted: [left: Macro.unpipe(left), right: right, file: env.file, data: data, sql: Macro.escape(sql), env: Macro.escape(env), config: Macro.escape(%{config| validate: nil}), stack: Macro.escape(stack)] do
-          {t,p,idx} = Enum.reduce(left, {[], [], 0}, fn
-            {[], 0}, acc        -> acc
-            {v, 0}, {t, p, idx} -> {t++v.tokens, p++v.params, idx+v.idx}
+        quote bind_quoted: [columns: Macro.escape(columns), left: Macro.unpipe(left), right: right, file: env.file, data: data, sql: Macro.escape(sql), env: Macro.escape(env), config: Macro.escape(%{config| validate: nil}), stack: Macro.escape(stack)] do
+          {t,p} = Enum.reduce(left, {[], []}, fn
+            {[], 0}, acc   -> acc
+            {v, 0}, {t, p} -> {t++v.tokens, p++v.params}
             end)
-          {:ok, context, tokens} = tokens(right, file, idx, sql.id, config)
+          {:ok, context, tokens} = tokens(right, file, sql.id)
           tokens = t++tokens
-          {context, string, inspect} = plan(tokens, %{context|validate: config.validate, module: config.adapter, types: context.types, format: :dynamic}, sql.id, stack, config)
+          context = %{context|validate: config.validate, module: config.adapter, format: :dynamic}
+          {string, inspect, columns, c_len, types, params} = plan(tokens, context, sql.id, stack, columns)
           portal = "p_#{:erlang.unique_integer([:positive])}"
-          %{sql | params: p++cast_params(context.binding, binding(), env, []), tokens: tokens, string: string, inspect: inspect, columns: context.description, c_len: length(context.description), portal: portal, p_len: byte_size(portal)}
+          %{sql | tokens: tokens, params: eval(params, binding(), env, p), types: types, columns: columns, c_len: c_len, portal: portal, p_len: byte_size(portal), string: string, inspect: inspect}
         end
+    end
+  end
+
+  def eval([], _binding, _env, acc), do: acc
+  def eval([value|rest], binding, env, acc) do
+    eval(rest, binding, env, [eval(value, binding, env)|acc])
+  end
+
+  defp eval(value, binding, env) do
+    case is_tuple(value) do
+      true ->
+        {v, _, _} = Code.eval_quoted_with_env(value, binding, env)
+        v
+      false -> value
     end
   end
 
@@ -296,7 +305,7 @@ defmodule SQL do
   def id(data) do
     case :persistent_term.get(data, nil) do
       nil ->
-        id = System.unique_integer([:positive])
+        id = :erlang.phash2(data)
         :persistent_term.put(data, id)
         id
       id -> id
@@ -304,19 +313,11 @@ defmodule SQL do
   end
 
   @doc false
-  def cast_params([], _binding, _env, acc), do: acc
-  def cast_params([q|params], binding, env, acc) when is_tuple(q) do
-    {q, _, _} = Code.eval_quoted_with_env(q, binding, env)
-    cast_params(params, binding, env, [q|acc])
-  end
-  def cast_params([q|params], binding, env, acc), do: cast_params(params, binding, env, [q|acc])
-
-  @doc false
-  def tokens(binary, file, count, id, _config) do
+  def tokens(binary, file, id) do
     key = {id, :lex}
     case :persistent_term.get(key, nil)  do
       nil ->
-        result = SQL.Lexer.lex(binary, file, count)
+        result = SQL.Lexer.lex(binary, file)
         :persistent_term.put(key, result)
         result
 
@@ -326,12 +327,13 @@ defmodule SQL do
   end
 
   @doc false
-  def plan(tokens, context, id, stack, config) do
+  def plan(tokens, context, id, stack, columns) do
     key = {context.module, id, :plan}
     case :persistent_term.get(key, nil) do
       nil ->
-        {:ok, context, tokens} = SQL.Parser.parse(tokens, %{context|columns: List.wrap(config[:columns])})
-        format = {context, IO.iodata_to_binary(context.module.to_iodata(tokens, context)), __inspect__(tokens, context, stack)}
+        {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
+        {:ok, columns, c_len, types, params} = SQL.Parser.describe(tokens, columns)
+        format = {IO.iodata_to_binary(context.module.to_iodata(tokens, context)), __inspect__(tokens, context, stack), columns, c_len, types, params}
         :persistent_term.put(key, format)
         format
 
@@ -370,13 +372,11 @@ defmodule SQL do
     reduce(%{sql | fn: fn row, acc -> fun.(sql.fn.(row), acc) end, acc: acc})
   end
   defp reduce(sql) do
-    # IO.inspect({sql.id, sql.portal, sql.string, sql.columns, sql.types, sql.acc})
-
     ref = make_ref()
     self = self()
     timestamp = System.monotonic_time()
     entry = {ref, self, timestamp, sql}
-    case Process.get(SQL.Transaction) do
+    case transaction() do
       nil ->
         conn = pick(sql.pool)
         send(conn, entry)
@@ -401,7 +401,7 @@ defmodule SQL do
         raise RuntimeError, message
     after
       timeout ->
-        send(conn, {:cancel, ref})
+        send(conn, {ref, :cancel})
         recv(conn, ref, timeout)
     end
   end
@@ -409,18 +409,34 @@ defmodule SQL do
   def conn(%SQL{pool: pool}), do: pick(pool)
   def conn(pool), do: pick(pool)
 
-  if Mix.env == :test do
-    defp conn() do
+  if Application.compile_env(:sql, :env) == :test do
+    defp __conn__() do
       {:links, links} = Process.info(self(), :links)
       {:parent, parent} = Process.info(self(), :parent)
-      pids = Enum.uniq([parent|links] ++ Process.get(:"$callers", []) ++ Process.get(:"$ancestors", []))
-      Enum.find_value(pids, Process.get(SQL.Conn), &:persistent_term.get({SQL.Conn, &1}, nil))
+      [parent|links]
+      |> Kernel.++(Process.get(:"$callers", []))
+      |> Kernel.++(Process.get(:"$ancestors", []))
+      |> Enum.uniq()
+      |> Enum.find_value(&:persistent_term.get({SQL.Conn, &1}, nil))
+    end
+    defp conn() do
+      case Process.get(SQL.Conn) || __conn__() do
+        {_, conn} -> conn
+        conn -> conn
+      end
+    end
+    def transaction() do
+      Process.get(SQL.Transaction) || __conn__()
     end
   else
     defp conn() do
       Process.get(SQL.Conn)
     end
+    def transaction() do
+      Process.get(SQL.Transaction)
+    end
   end
+
 
   defp pick(pool) do
     case conn() do
@@ -429,7 +445,8 @@ defmodule SQL do
         conn = elem(conns, :erlang.phash2({self(), :rand.uniform(1_000_000)}, tuple_size(conns)-1))
         Process.put(SQL.Conn, conn)
         conn
-      conn -> conn
+      conn ->
+        conn
     end
   end
 

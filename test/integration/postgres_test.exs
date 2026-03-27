@@ -5,15 +5,6 @@ defmodule SQL.Integration.Postgres.Types do
   use SQL, adapter: SQL.Adapters.Postgres
 
   def list do
-    # ~SQL"""
-    # SELECT oid::int4, typname::text
-    # FROM pg_type
-    # WHERE typname NOT LIKE '\_%' ESCAPE '\' AND typname NOT LIKE 'pg_%' AND typname NOT LIKE 'txid_%' AND typname NOT IN ('int2vector', 'oidvector', 'jsonpath', 'tsquery', 'ltxtquery') AND typtype='b' AND (typinput <> 0 AND typreceive <> 0)
-    # ORDER BY typname
-    # """
-    # |> Enum.to_list()
-    #
-
     ~SQL"""
     SELECT t.oid::int4,
            t.typname::text AS name,
@@ -111,7 +102,7 @@ defmodule SQL.Integration.PostgresTest do
       @tag type: type.name
       test "round-trip #{type.name}" do
         value = Types.value(unquote(Macro.escape(type.name)))
-        sql = SQL.parse(unquote("select {{value}}::#{Types.type(type.name)}"), [value], SQL.Adapters.Postgres)
+        sql = SQL.parse(unquote("select {{value}}::#{Types.type(type.name)}"), [value: value], SQL.Adapters.Postgres)
         assert [[value]] == Enum.to_list(sql)
       end
     end
@@ -153,21 +144,21 @@ defmodule SQL.Integration.PostgresTest do
   end
 
   test "transaction state are propagated" do
-    state = Process.get(SQL.Transaction)
+    {_owner, conn} = Process.get(SQL.Transaction)
     parent = self()
     fun = fn -> send(parent, SQL.conn(:default)) end
     spawn_link(fun)
-    assert_receive ^state
+    assert_receive ^conn
 
     spawn(fun)
-    assert_receive ^state
+    assert_receive ^conn
 
     Task.async(fun)
-    assert_receive ^state
+    assert_receive ^conn
 
     Task.Supervisor.start_link(name: SQL.TaskSupervisor)
     Task.Supervisor.async_nolink(SQL.TaskSupervisor, fun)
-    assert_receive ^state
+    assert_receive ^conn
   end
 
   test "connection pool is self healing" do

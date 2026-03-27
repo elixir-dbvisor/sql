@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2025 DBVisor
+
 defmodule Mix.Tasks.Compile.Sql do
   @moduledoc """
   A SQL compiler for sql files.

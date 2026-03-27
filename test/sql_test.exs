@@ -426,6 +426,12 @@ defmodule SQLTest do
         assert {" select id, email, inserted_at, updated_at from users u where u.email::text = ?", [email]} == SQL.to_sql(sql)
       end
     end
+
+    test "preserve order" do
+      name = "alice"
+      min_age = 18
+      assert {" select id, ? as threshold from users where name = ?", [min_age, name]} == SQL.to_sql(~SQL[WHERE name = {{name}} SELECT id, {{min_age}} AS threshold FROM users])
+    end
   end
 
   describe "operators" do

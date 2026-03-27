@@ -8,6 +8,10 @@ defmodule SQL.Adapters.TDS do
   @moduledoc since: "0.2.0"
   use SQL.Token
 
-  defp to_iodata({:binding, m, [idx]}, format, _case, acc) when is_integer(idx), do: indention(["@#{idx}"|acc], format, m)
+  defp to_iodata({:binding, m, _}, format, _case, acc) do
+    idx = Process.get(:sql_binding)
+    Process.put(:sql_binding, idx-1)
+    indention(["@#{idx}"|acc], format, m)
+  end
   defp to_iodata(token, format, case, acc), do: __to_iodata__(token, format, case, acc)
 end

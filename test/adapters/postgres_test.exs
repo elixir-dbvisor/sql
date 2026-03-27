@@ -194,13 +194,13 @@ defmodule SQL.Adapters.PostgresTest do
       assert "select 'db.users'" == to_string(~SQL[select 'db.users'])
       assert "select \"db.users.id\", 'db.users'" == to_string(~SQL[select "db.users.id", 'db.users'])
 
-      # assert "select U&\"d\\0061t\\+000061\"" == to_string(~SQL[select U&"d\0061t\+000061"])
-      # assert "select U&\"\\0441\\043B\\043E\\043D\"" == to_string(~SQL[select U&"\0441\043B\043E\043D"])
-      # assert "select U&\"d!0061t!+000061\" uescape '!'" == to_string(~SQL[select U&"d!0061t!+000061" UESCAPE '!'])
+      assert "select u&\"d\\0061t\\+000061\"" == to_string(~SQL[select U&"d\0061t\+000061"])
+      assert "select u&\"\\0441\\043B\\043E\\043D\"" == to_string(~SQL[select U&"\0441\043B\043E\043D"])
+      assert "select u&\"d!0061t!+000061\" uescape '!'" == to_string(~SQL[select U&"d!0061t!+000061" UESCAPE '!'])
 
-      # assert "select U&'d\\0061t\\+000061'" == to_string(~SQL[select U&'d\0061t\+000061'])
-      # assert "select U&'\\0441\\043B\\043E\\043D'" == to_string(~SQL[select U&'\0441\043B\043E\043D'])
-      # assert "select U&'d!0061t!+000061' uescape '!'" == to_string(~SQL[select U&'d!0061t!+000061' UESCAPE '!'])
+      assert "select u&'d\\0061t\\+000061'" == to_string(~SQL[select U&'d\0061t\+000061'])
+      assert "select u&'\\0441\\043B\\043E\\043D'" == to_string(~SQL[select U&'\0441\043B\043E\043D'])
+      assert "select u&'d!0061t!+000061' uescape '!'" == to_string(~SQL[select U&'d!0061t!+000061' UESCAPE '!'])
     end
 
     test "dollar qouted" do
@@ -331,12 +331,12 @@ defmodule SQL.Adapters.PostgresTest do
     test "-|-" do
       assert "where id -|- 1" == to_string(~SQL[where id -|- 1])
     end
-    # test "->" do
-    #   assert "where meta -> '{}'" == to_string(~SQL[where meta -> '{}'])
-    # end
-    # test "->>" do
-    #   assert "where meta ->> '{}'" == to_string(~SQL[where meta ->> '{}'])
-    # end
+    test "->" do
+      assert "where meta -> '{}'" == to_string(~SQL[where meta -> '{}'])
+    end
+    test "->>" do
+      assert "where meta ->> '{}'" == to_string(~SQL[where meta ->> '{}'])
+    end
     test "between" do
       assert "where id between 1 and 2" == to_string(~SQL[where id between 1 and 2])
       assert "where id not between 1 and 2" == to_string(~SQL[where id not between 1 and 2])

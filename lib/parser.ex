@@ -3,16 +3,12 @@
 
 defmodule SQL.Parser do
   @moduledoc false
-  @compile {:inline, validate: 3, validate_columns: 3, validate_table: 3, sort: 1, description: 6}
+  @compile {:inline, validate: 3, validate_columns: 3, validate_table: 3, sort: 1}
 
-  def parse(tokens, context) do
-    case parse(tokens, context, [], [], [], [], []) do
-      {:ok, %{columns: columns, types: types}=context, tokens} ->
-        {columns, aliases, types} = description(tokens, List.wrap(columns), types, [], [], [])
-        context = %{context | description: columns, types: types, aliases: aliases}
-        {:ok, context, tokens}
-    end
-  end
+  def describe(tokens, columns), do: description(tokens, columns, [], [], [])
+
+  def parse(tokens, context), do: parse(tokens, context, [], [], [], [], [])
+
   defp parse([], context, [], [], [], tokens, errors) do
     {:ok, %{context | errors: errors++context.errors}, tokens}
   end
@@ -50,6 +46,9 @@ defmodule SQL.Parser do
       context
     end
     parse(tokens, context, unit, unit, [{t, m, __parse__(a)++acc++sorted}], acc2, errors)
+  end
+  defp parse([{:colon=t, m, a}, {tag, _, _} = node|tokens], context, unit, acc, root, acc2, errors) when tag in ~w[begin commit rollback]a do
+    parse(tokens, context, unit, acc, [{t, m, [node|a]}|root], acc2, errors)
   end
   defp parse([{:comma=t, m, a}|tokens], context, unit, acc, root, acc2, errors) do
     parse(tokens, context, a, [{t, m, __parse__(unit)}|acc], root, acc2, errors)
@@ -175,7 +174,7 @@ defmodule SQL.Parser do
     node = {t,m,__parse__(a)++acc}
     parse(tokens, context, unit, unit, [node|root], acc2, validate(node, context, errors))
   end
-  defp parse([{:from=t,m,[]=unit}|tokens], context, [{tag,_,_}|_]=a, acc, root, acc2, errors) when tag in ~w[double_quote bracket dot ident as binding]a do
+  defp parse([{:from=t,m,[]=unit}|tokens], context, [{tag,_,_}|_]=a, acc, root, acc2, errors) when tag in ~w[double_quote bracket dot ident as generate_series]a do
     node = {t,m,__parse__(a)++acc}
     parse(tokens, context, unit, unit, [node|root], acc2, validate(node, context, errors))
   end
@@ -274,6 +273,23 @@ defmodule SQL.Parser do
       [{_, _, _}=l, {t=:"::", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
 
       [{_, _, _}=l, {t=:"||", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:"->", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:"->>", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:"-|-", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:">>=", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:"@@", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:"|&>", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:"|>>", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:"<<|", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:"&<|", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:"<@", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:"@>", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:"~=", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:">>", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:"&>", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:"&&", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:"&<", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
+      [{_, _, _}=l, {t=:"<<", m, []=a}, {_, _, _}=r|rest]  -> __parse__([{t, m, [l,r|a]}|rest])
 
       [{_, _, _}=l, {t=:as, m, []=a}, {_, _, _}=r|rest] -> __parse__([{t, m, [l,r|a]}|rest])
       [{_, _, _}=l, {t=:over, m, []=a}, {_, _, _}=r|rest] -> __parse__([{t, m, [l,r|a]}|rest])
@@ -378,34 +394,35 @@ defmodule SQL.Parser do
   end
   defp validate_columns(_fun, _, acc), do: acc
 
-  defp description([{tag, _, [left, right]}|_rest], columns, types, froms, select, bindings) when tag in ~w[except intersect union]a do
-    left = description(List.wrap(left), columns, types, froms, select, bindings)
-    right = description(List.wrap(right), columns, types, froms, select, bindings)
+  defp description([{tag, _, [left, right]}|_rest], columns, froms, select, bindings) when tag in ~w[except intersect union]a do
+    left = description(List.wrap(left), columns, froms, select, bindings)
+    right = description(List.wrap(right), columns, froms, select, bindings)
     if left == right, do: left, else: right
   end
-  defp description([{:paren, _, [[_|_]=values]}|rest], columns, types, froms, select, bindings) do
-    description(values++rest, columns, types, froms, select, bindings)
+  defp description([{:paren, _, [[_|_]=values]}|rest], columns, froms, select, bindings) do
+    description(values++rest, columns, froms, select, bindings)
   end
-  defp description([{tag, _, _}=node|rest], columns, types, froms, select, bindings) when tag in ~w[insert from update inner outer left right full natural cross join]a do
-    description(rest, columns, types, [node|froms], select, [node|bindings])
+  defp description([{tag, _, _}=node|rest], columns, froms, select, bindings) when tag in ~w[insert from update inner outer left right full natural cross join]a do
+    description(rest, columns, [node|froms], select, [node|bindings])
   end
-  defp description([{tag, _, _}=node|rest], columns, types, froms, select, bindings) when tag in ~w[select returning]a do
-    description(rest, columns, types, froms, [node|select], [node|bindings])
+  defp description([{tag, _, _}=node|rest], columns, froms, select, bindings) when tag in ~w[select returning]a do
+    description(rest, columns, froms, [node|select], [node|bindings])
   end
-  defp description([{_, _, _}=node|rest], columns, types, froms, select, bindings) do
-    description(rest, columns, types, froms, select, [node|bindings])
+  defp description([{_, _, _}=node|rest], columns, froms, select, bindings) do
+    description(rest, columns, froms, select, [node|bindings])
   end
-  defp description([[{_, _, _}|_]=rest], columns, types, froms, select, bindings) do
-    description(rest, columns, types, froms, select, bindings)
+  defp description([[{_, _, _}|_]=rest], columns, froms, select, bindings) do
+    description(rest, columns, froms, select, bindings)
   end
-  defp description([], columns, types, []=aliases, [], bindings) do
-    {[], aliases, resolve_binding(Enum.reverse(bindings), aliases, columns, types)}
+  defp description([], columns, []=aliases, [], bindings) do
+    {types, params} = resolve_binding(Enum.reverse(bindings), aliases, columns, [], [])
+    {:ok, [], 0, Enum.reverse(types), Enum.reverse(params)}
   end
-  defp description([], columns, types, froms, select, bindings) do
+  defp description([], columns, froms, select, bindings) do
     aliases = resolve_aliases(froms, columns, [])
-    types = resolve_binding(Enum.reverse(bindings), aliases, columns, types)
     description = resolve_description(select, aliases, columns, [])
-    {description, aliases, types}
+    {types, params} = resolve_binding(Enum.reverse(bindings), aliases, columns, [], [])
+    {:ok, description, length(description), Enum.reverse(types), params}
   end
 
   defp resolve_description([], _aliases, _columns, []=acc), do: acc
@@ -498,36 +515,54 @@ defmodule SQL.Parser do
   end
   defp resolve_type([], _column, prospect), do: prospect
 
+  defp resolve_binding([], [], types, params), do: {types, params}
+  defp resolve_binding([{:binding, _, [value]}|values], [{type, _col}|aliases], types, params) do
+    resolve_binding(values, aliases, [type|types], [value|params])
+  end
+  defp resolve_binding([{:comma, _, [{:binding, _, [value]}]}|values], [{type, _col}|aliases], types, params) do
+    resolve_binding(values, aliases, [type|types], [value|params])
+  end
+  defp resolve_binding([_|values], [_|aliases], types, params) do
+    resolve_binding(values, aliases, types, params)
+  end
 
-  defp resolve_binding([], [], types), do: types
-  defp resolve_binding([{:binding, _, [idx]}|values], [{type, _col}|aliases], types) do
-    resolve_binding(values, aliases, List.insert_at(types, idx, type))
+  defp resolve_binding([{:into, _, [_, {:paren,_, c}, {:values,_,[{:paren, _, values}]}]}|rest], [insert: [insert]]=aliases, columns, types, params) do
+    {types, params} = resolve_binding(values, resolve_values(c, elem(insert, tuple_size(insert)-1), []), types, params)
+    resolve_binding(rest, aliases, columns, types, params)
   end
-  defp resolve_binding([{:comma, _, [{:binding, _, [idx]}]}|values], [{type, _col}|aliases], types) do
-    resolve_binding(values, aliases, List.insert_at(types, idx, type))
+  defp resolve_binding([{:as, _, [{:binding, _, [value]}, _right]}|rest], aliases, columns, types, params) do
+    resolve_binding(rest, aliases, columns, [nil|types], [value|params])
   end
-  defp resolve_binding([_|values], [_|aliases], types) do
-    resolve_binding(values, aliases, types)
+  defp resolve_binding([{_, [_, {:type, :operator}|_], [{:not, _, [{:binding, _, [l]}]}, {:binding, _, [r]}]}|rest], aliases, columns, types, params) do
+    resolve_binding(rest, aliases, columns, [nil,nil|types], [r,l|params])
   end
-
-
-  defp resolve_binding([{:into, _, [_, {:paren,_, c}, {:values,_,[{:paren, _, values}]}]}|rest], [insert: [insert]]=aliases, columns, types) do
-    resolve_binding(rest, aliases, columns, resolve_binding(values, resolve_values(c, elem(insert, tuple_size(insert)-1), []), types))
+  defp resolve_binding([{_, [_, {:type, :operator}|_], [{:binding, _, [l]}, {:binding, _, [r]}]}|rest], aliases, columns, types, params) do
+    resolve_binding(rest, aliases, columns, [nil,nil|types], [r,l|params])
   end
-  defp resolve_binding([{_, _, [{:binding, _, [idx]}, right]}|rest], aliases, columns, types) do
-    resolve_binding(rest, aliases, columns, List.insert_at(types, idx, type(right, aliases)))
+  defp resolve_binding([{_, [_, {:type, :operator}|_], [{:binding, _, [value]}, right]}|rest], aliases, columns, types, params) do
+    case type(right, aliases) do
+      [{type, _col}] -> resolve_binding(rest, aliases, columns, [type|types], [value|params])
+      type -> resolve_binding(rest, aliases, columns, [type|types], [value|params])
+    end
   end
-  defp resolve_binding([{_, _, [left, {:binding, _, [idx]}]}|rest], aliases, columns, types) do
-    resolve_binding(rest, aliases, columns, List.insert_at(types, idx, type(left, aliases)))
+  defp resolve_binding([{_, [_, {:type, :operator}|_], [left, {:binding, _, [value]}]}|rest], aliases, columns, types, params) do
+    case type(left, aliases) do
+      [{type, _col}] -> resolve_binding(rest, aliases, columns, [type|types], [value|params])
+      type -> resolve_binding(rest, aliases, columns, [type|types], [value|params])
+    end
   end
-  defp resolve_binding([{_, _, [{_, _, _}|_]=value}|rest], aliases, columns, types) do
-    resolve_binding(rest, aliases, columns, resolve_binding(value, aliases, columns, types))
+  defp resolve_binding([{:binding, _, [value]}|rest], []=aliases, columns, types, params) do
+    resolve_binding(rest, aliases, columns, [nil|types], [value|params])
   end
-  defp resolve_binding([{_, _, _}|rest], aliases, columns, types) do
-    resolve_binding(rest, aliases, columns, types)
+  defp resolve_binding([{_, _, [{_, _, _}|_]=value}|rest], aliases, columns, types, params) do
+    {types, params} = resolve_binding(value, aliases, columns, types, params)
+    resolve_binding(rest, aliases, columns, types, params)
   end
-  defp resolve_binding([], _aliases, _columns, types) do
-    types
+  defp resolve_binding([{_, _, _}|rest], aliases, columns, types, params) do
+    resolve_binding(rest, aliases, columns, types, params)
+  end
+  defp resolve_binding([], _aliases, _columns, types, params) do
+    {types, params}
   end
 
   defp resolve_values([], _columns, acc), do: Enum.reverse(acc)

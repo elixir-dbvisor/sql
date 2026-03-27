@@ -22,13 +22,19 @@ defmodule SQL.Adapters.Postgres do
     end
   end
 
-  defp to_iodata({:in, m, [{:not, _, left}, {:binding, _, [idx]}]}, format, case, acc) do
+  defp to_iodata({:in, m, [{:not, _, left}, {:binding, _, _}]}, format, case, acc) do
+    idx = Process.get(:sql_binding)
+    Process.put(:sql_binding, idx-1)
     to_iodata(left, format, case, indention(["!= ANY($#{idx})"|acc], format, m))
   end
-  defp to_iodata({:in, m, [left, {:binding, _, [idx]} ]}, format, case, acc) do
+  defp to_iodata({:in, m, [left, {:binding, _, _} ]}, format, case, acc) do
+    idx = Process.get(:sql_binding)
+    Process.put(:sql_binding, idx-1)
     to_iodata(left, format, case, indention(["= ANY($#{idx})"|acc], format, m))
   end
-  defp to_iodata({:binding, m, [idx]}, format, _case, acc) do
+  defp to_iodata({:binding, m, _}, format, _case, acc) do
+    idx = Process.get(:sql_binding)
+    Process.put(:sql_binding, idx-1)
     indention(["$#{idx}"|acc], format, m)
   end
   defp to_iodata(token, format, case, acc), do: __to_iodata__(token, format, case, acc)
@@ -49,10 +55,10 @@ defmodule SQL.Adapters.Postgres do
         |> case do
           %{ssl: false} = state ->
             send_data(state, <<25+byte_size(username)+byte_size(database)::32, 196_608::32, "user", 0, username::binary, 0, "database", 0, database::binary, 0, 0>>)
-            loop(state, <<>>, %{}, %{}, 0, 1, :queue.new(), nil, [], 0)
+            loop(state, <<>>, :queue.new(), %{}, nil, :queue.new(), nil, [], 0)
           state ->
             send_data(state, @ssl)
-            loop(state, <<>>, %{}, %{}, 0, 1, :queue.new(), nil, [], 0)
+            loop(state, <<>>, :queue.new(), %{}, nil, :queue.new(), nil, [], 0)
         end
     end
   end
@@ -67,99 +73,97 @@ defmodule SQL.Adapters.Postgres do
     state
   end
 
-  defp loop(%{sock: socket, handle: handle, timeout: timeout} = state, buffer, inflight, prepared, total, current, queue, owner, rows, count) do
+
+  defp loop(%{sock: socket, handle: handle, timeout: timeout} = state, buffer, inflight, prepared, current, queue, owner, rows, count) do
     receive do
-      {:cancel, ref} ->
-        case Enum.find(inflight, fn {_, {r, _caller, _timestamp, _sql}} -> r == ref end) do
-          nil -> loop(state, buffer, inflight, prepared, total, current, :queue.filter(fn {r, _caller, _timestamp, _sql} -> r != ref  end, queue), owner, rows, count)
-          {^current, {^ref, _caller, _timestamp, _sql}} -> loop(cancel(state), buffer, inflight, prepared, total, current, queue, owner, rows, count)
-          _ -> loop(state, buffer, inflight, prepared, total, current, queue, owner, rows, count)
+      {ref, :cancel} ->
+        case current do
+          {^ref, _caller, _timestamp, _sql} ->
+            loop(cancel(state), buffer, inflight, prepared, current, queue, owner, rows, count)
+          _ ->
+            loop(state, buffer, inflight, prepared, current, :queue.filter(fn {r, _caller, _timestamp, _sql} -> r != ref  end, queue), owner, rows, count)
         end
       {ref, caller, _timestamp, %{tokens: [{:begin, _, _}]}}=entry when is_nil(owner) ->
         send caller, {ref, :begin}
-        prepare(entry, state, buffer, inflight, prepared, total, current, queue, caller, rows, count)
+        prepare(entry, state, buffer, inflight, prepared, current, queue, caller, rows, count)
       {_ref, ^owner, _timestamp, %{tokens: [{:commit, _, _}]}}=entry ->
-        prepare(entry, state, buffer, inflight, prepared, total, current, queue, nil, rows, count)
+        prepare(entry, state, buffer, inflight, prepared, current, queue, nil, rows, count)
       {_ref, ^owner, _timestamp, %{tokens: [{:rollback, _, _}]}}=entry ->
-        prepare(entry, state, buffer, inflight, prepared, total, current, queue, nil, rows, count)
-      {ref, ^owner, _timestamp, %{tokens: [{:savepoint, _, _}|_]}}=entry ->
-        send owner, {ref, :begin}
-        prepare(entry, state, buffer, inflight, prepared, total, current, queue, owner, rows, count)
-      {_ref, ^owner, _timestamp, %{tokens: [{:release, _, _}|_]}}=entry ->
-        prepare(entry, state, buffer, inflight, prepared, total, current, queue, owner, rows, count)
-      {_ref, ^owner, _timestamp, %{tokens: [{:rollback, _, _}|_]}}=entry ->
-        prepare(entry, state, buffer, inflight, prepared, total, current, queue, owner, rows, count)
+        prepare(entry, state, buffer, inflight, prepared, current, queue, nil, rows, count)
+      {^owner, {ref, caller, _timestamp, %{tokens: [{:savepoint, _, _}|_]}}=entry} ->
+        send caller, {ref, :begin}
+        prepare(entry, state, buffer, inflight, prepared, current, queue, owner, rows, count)
+      {^owner, {_ref, _caller, _timestamp, %{tokens: [{:release, _, _}|_]}}=entry} ->
+        prepare(entry, state, buffer, inflight, prepared, current, queue, owner, rows, count)
+      {^owner, {_ref, _caller, _timestamp, %{tokens: [{:rollback, _, _}|_]}}=entry} ->
+        prepare(entry, state, buffer, inflight, prepared, current, queue, owner, rows, count)
       {^owner, entry} ->
-        prepare_execute(entry, state, buffer, inflight, prepared, total, current, queue, owner, rows, count)
+        prepare_execute(entry, state, buffer, inflight, prepared, current, queue, owner, rows, count)
       {_ref, _caller, _timestamp, %SQL{}} = entry when is_nil(owner) ->
-        prepare_execute(entry, state, buffer, inflight, prepared, total, current, queue, owner, rows, count)
+        prepare_execute(entry, state, buffer, inflight, prepared, current, queue, owner, rows, count)
       {_ref, _caller, _timestamp, %SQL{}} = entry ->
-        loop(state, buffer, inflight, prepared, total, current, :queue.in(entry, queue), owner, rows, count)
+        loop(state, buffer, inflight, prepared, current, :queue.in(entry, queue), owner, rows, count)
       {:"$socket", ^socket, :select, ^handle} ->
-        drain(state, buffer, inflight, prepared, total, current, queue, owner, rows, count)
+        drain(state, buffer, inflight, prepared, current, queue, owner, rows, count)
       {:ssl, ^socket, data} ->
         :ssl.setopts(socket, active: :once)
-        parse_messages(state, <<buffer::binary, data::binary>>, inflight, prepared, total, current, queue, owner, rows, count)
+        parse_messages(state, <<buffer::binary, data::binary>>, inflight, prepared, current, queue, owner, rows, count)
       {:ssl_closed, ^socket} = other ->
         raise other
       {:ssl_error, ^socket, reason} ->
         raise reason
       after
         5 ->
-          case inflight do
-            %{^current => {ref, _caller, timestamp, sql}} ->
+          case current do
+            {ref, _caller, timestamp, sql} ->
               if System.convert_time_unit(System.monotonic_time()-timestamp, :native, :millisecond) >= (sql.timeout || timeout) do
-                send(self(), {:cancel, ref})
+                send(self(), {ref, :cancel})
+                loop(state, buffer, inflight, prepared, current, queue, owner, rows, count)
+              else
+                loop(state, buffer, inflight, prepared, current, queue, owner, rows, count)
               end
-            _ ->
-              :ok
-          end
-          case owner do
-            nil ->
+            nil when is_nil(owner)  ->
               case :queue.out(queue) do
                 {:empty, _} ->
-                  loop(state, buffer, inflight, prepared, total, current, queue, owner, rows, count)
+                  loop(state, buffer, inflight, prepared, current, queue, owner, rows, count)
                 {{:value, entry}, queue} ->
                   send(self(), entry)
-                  loop(state, buffer, inflight, prepared, total, current, queue, owner, rows, count)
+                  loop(state, buffer, inflight, prepared, current, queue, owner, rows, count)
               end
-            _owner ->
-              loop(state, buffer, inflight, prepared, total, current, queue, owner, rows, count)
+            nil ->
+              loop(state, buffer, inflight, prepared, current, queue, owner, rows, count)
           end
     end
   end
 
-  defp prepare({_ref, _caller, _timestamp, %SQL{name: name}=sql}, state, buffer, inflight, prepared, total, current, queue, owner, rows, count) do
+  defp prepare({_ref, _caller, _timestamp, %SQL{name: name}=sql}, state, buffer, inflight, prepared, current, queue, owner, rows, count) do
     case !is_map_key(prepared, name) do
       false ->
         send_data(state, bind(sql, owner))
-        loop(state, buffer, inflight, prepared, total, current, queue, owner, rows, count)
+        loop(state, buffer, inflight, prepared, current, queue, owner, rows, count+1)
       prepare ->
         send_data(state, prepare(sql, [bind(sql, owner)]))
-        loop(state, buffer, inflight, Map.put(prepared, name, prepare), total, current, queue, owner, rows, count)
+        loop(state, buffer, inflight, Map.put(prepared, name, prepare), current, queue, owner, rows, count+1)
     end
   end
 
-  defp prepare_execute({_ref, _caller, _timestamp, %SQL{name: name}=sql}=entry, state, buffer, inflight, prepared, total, current, queue, owner, rows, count) do
-    total = total + 1
+  defp prepare_execute({_ref, _caller, _timestamp, %SQL{name: name}=sql}=entry, state, buffer, inflight, prepared, current, queue, owner, rows, count) do
+    inflight = if current, do: :queue.in(entry, inflight), else: inflight
+    current = if current, do: current, else: entry
     case !is_map_key(prepared, name) do
       false ->
         send_data(state, bind(sql, owner))
-        loop(state, buffer, Map.put(inflight, total, entry), prepared, total, current, queue, owner, rows, count)
+        loop(state, buffer, inflight, prepared, current, queue, owner, rows, count+1)
       prepare ->
         send_data(state, prepare(sql, [bind(sql, owner)]))
-        loop(state, buffer, Map.put(inflight, total, entry), Map.put(prepared, name, prepare), total, current, queue, owner, rows, count)
+        loop(state, buffer, inflight, Map.put(prepared, name, prepare), current, queue, owner, rows, count+1)
     end
-    # if Enum.find(inflight, fn {_, {_, _, s}} -> sql===s end) == nil do
-      # if prepare, do: send_data(state, prepare(sql))
-      # send_data(state, bind(sql))
-    # end
   end
 
-  defp drain(%{sock: socket, handle: handle} = state, <<buffer::binary>>, inflight, prepared, total, current, queue, owner, rows, count) do
+  defp drain(%{sock: socket, handle: handle} = state, <<buffer::binary>>, inflight, prepared, current, queue, owner, rows, count) do
     case :socket.recv(socket, 0, [], handle) do
-      {:ok, data} -> drain(state, <<buffer::binary, data::binary>>, inflight, prepared, total, current, queue, owner, rows, count)
-      {:select, {:select_info, :recv, ^handle}} -> parse_messages(state, buffer, inflight, prepared, total, current, queue, owner, rows, count)
+      {:ok, data} -> drain(state, <<buffer::binary, data::binary>>, inflight, prepared, current, queue, owner, rows, count)
+      {:select, {:select_info, :recv, ^handle}} -> parse_messages(state, buffer, inflight, prepared, current, queue, owner, rows, count)
     end
   end
 
@@ -170,21 +174,21 @@ defmodule SQL.Adapters.Postgres do
     :ssl.send(socket, data)
   end
 
-  defp handle_data(state, ""=buffer, inflight, prepared, total, current, queue, owner, rows, count) do
-    loop(state, buffer, inflight, prepared, total, current, queue, owner, rows, count)
+  defp handle_data(state, ""=buffer, inflight, prepared, current, queue, owner, rows, count) do
+    loop(state, buffer, inflight, prepared, current, queue, owner, rows, count)
   end
-  defp handle_data(state, buffer, inflight, prepared, total, current, queue, owner, rows, count) do
-    parse_messages(state, buffer, inflight, prepared, total, current, queue, owner, rows, count)
+  defp handle_data(state, buffer, inflight, prepared, current, queue, owner, rows, count) do
+    parse_messages(state, buffer, inflight, prepared, current, queue, owner, rows, count)
   end
 
-  defp parse_messages(%{sock: socket, ssl: ssl, password: password, username: username, parameter: parameter, database: database, timeout: timeout}=state, <<buffer::binary>>, inflight, prepared, total, current, queue, owner, rows, count) do
+  defp parse_messages(%{sock: socket, ssl: ssl, password: password, username: username, parameter: parameter, database: database, timeout: timeout, timezone: timezone}=state, <<buffer::binary>>, inflight, prepared, current, queue, owner, rows, count) do
     case buffer do
       <<?S, rest::binary>> when elem(socket, 0) == :"$socket" and is_list(ssl) ->
         {:ok, socket} = :ssl.connect(socket, ssl, timeout)
         :ssl.setopts(socket, active: :once)
         state = %{state | socket: socket}
         send_data(state, <<25+byte_size(username)+byte_size(database)::32, 196_608::32, "user", 0, username::binary, 0, "database", 0, database::binary, 0, 0>>)
-        parse_messages(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
+        parse_messages(state, rest, inflight, prepared, current, queue, owner, rows, count)
       <<?N, _rest::binary>> when elem(socket, 0) == :"$socket" and is_list(ssl) ->
         raise "SSL not supported by server"
       <<?R, len::32, 10::32, payload::binary-size(len-8), rest::binary>> ->
@@ -192,7 +196,7 @@ defmodule SQL.Adapters.Postgres do
         if "SCRAM-SHA-256" in mechanisms do
           scram_nonce = Base.encode64(:crypto.strong_rand_bytes(18))
           send_data(state, <<?p,54::32,"SCRAM-SHA-256",0,32::32,?n,?,,?,,?n,?=,?,,?r,?=,scram_nonce::binary>>)
-          parse_messages(Map.put(state, :scram_nonce, scram_nonce), rest, inflight, prepared, total, current, queue, owner, rows, count)
+          parse_messages(Map.put(state, :scram_nonce, scram_nonce), rest, inflight, prepared, current, queue, owner, rows, count)
         else
           raise "Unsupported SASL mechanism: #{inspect(mechanisms)}"
         end
@@ -209,7 +213,7 @@ defmodule SQL.Adapters.Postgres do
         client_signature = :crypto.mac(:hmac, :sha256, :crypto.hash(:sha256, client_key), auth_message)
         proof = Base.encode64(:crypto.exor(client_key, client_signature))
         send_data(state,  <<?p,byte_size(r)+byte_size(proof)+16::32,?c,?=,?b,?i,?w,?s,?,,?r,?=,r::binary,?,,?p,?=,proof::binary>>)
-        parse_messages(Map.put(Map.put(state, :scram_salted_password, salted_password), :scram_auth_message, auth_message), rest, inflight, prepared, total, current, queue, owner, rows, count)
+        parse_messages(Map.put(Map.put(state, :scram_salted_password, salted_password), :scram_auth_message, auth_message), rest, inflight, prepared, current, queue, owner, rows, count)
       <<?R, len::32-big, 12::32-big, payload::binary-size(len-8), rest::binary>> ->
         %{?v => server_signature_b64} = for kv <- :binary.split(payload, ",", [:global]), into: %{} do
                                         <<k, "=", v::binary>> = kv
@@ -220,85 +224,81 @@ defmodule SQL.Adapters.Postgres do
         if server_signature_b64 != expected_sig do
           raise "SCRAM server signature mismatch"
         end
-        parse_messages(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
+        parse_messages(state, rest, inflight, prepared, current, queue, owner, rows, count)
       <<?R, len::32, 5::32, salt::binary-size(len-8), rest::binary>> ->
         password = "md5#{Base.encode16(:crypto.hash(:md5, [Base.encode16(:crypto.hash(:md5, [password, username]), case: :lower), salt]), case: :lower)}"
         send_data(state, <<?p, 5+byte_size(password)::32, password::binary, 0>>)
-        handle_data(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
+        handle_data(state, rest, inflight, prepared, current, queue, owner, rows, count)
       <<?R, 4::32, 3::32, rest::binary>> ->
         send_data(state, <<?p, 5+byte_size(password)::32, password::binary, 0>>)
-        handle_data(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
+        handle_data(state, rest, inflight, prepared, current, queue, owner, rows, count)
       <<?R, 4::32, 0::32, rest::binary>> ->
-        parse_messages(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
+        parse_messages(state, rest, inflight, prepared, current, queue, owner, rows, count)
       <<?E, len::32, payload::binary-size(len-4), rest::binary>> ->
         error = error(payload)
-        case inflight do
-          %{^current => {ref, caller, _timestamp, sql}} ->
+        case current do
+          {ref, caller, _timestamp, sql} ->
             send(caller, {ref, {:error, %{error|sql: sql.string}}})
-            parse_messages(state, rest, Map.delete(inflight, current), prepared, total, current+1, queue, owner, rows, count)
+            case :queue.out(inflight) do
+              {:empty, inflight} ->
+                parse_messages(state, rest, inflight, prepared, nil, queue, owner, rows, count)
+              {{:value, value}, inflight} ->
+                parse_messages(state, rest, inflight, prepared, value, queue, owner, rows, count)
+            end
           _ ->
             Logger.error(error)
-            parse_messages(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
+            parse_messages(state, rest, inflight, prepared, current, queue, owner, rows, count)
         end
-      <<?C, len::32, "BEGIN", _payload::binary-size(len-9), rest::binary>> ->
-        parse_messages(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
-      <<?C, len::32, "COMMIT", _payload::binary-size(len-10), rest::binary>> ->
-        parse_messages(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
-      <<?C, len::32, "SAVEPOINT", _payload::binary-size(len-13), rest::binary>> ->
-        parse_messages(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
-      <<?C, len::32, "RELEASE", _payload::binary-size(len-11), rest::binary>> ->
-        parse_messages(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
-      <<?C, len::32, "ROLLBACK", _payload::binary-size(len-12), rest::binary>> ->
-        parse_messages(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
-      <<?C, _::32, 83, 69, 84, 0, rest::binary>> ->
-        parse_messages(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
-      <<?C, len::32, _payload::binary-size(len-4), rest::binary>> ->
-        %{^current => {ref, caller, _timestamp, sql}} = inflight
-        send_data(state, close(sql))
+      <<?C, len::32, tag::binary-size(7), _payload::binary-size(len-11), rest::binary>> when tag in ["SELECT ", "UPDATE ", "DELETE ", "INSERT "] ->
+        {ref, caller, _timestamp, sql} = current
+        if is_pid(owner), do: send_data(state, close(sql))
         send caller, {ref, Enumerable.reduce(rows, sql.acc, sql.fn)}
-        parse_messages(state, rest, Map.delete(inflight, current), prepared, total, current+1, queue, owner, [], 0)
-        # case Map.split_with(inflight, fn {_k, {s, _}} -> sql===s end) do
-        #   {callers, inf} when map_size(inf) == 0 ->
-        #     # current = Enum.max(Map.keys(inflight))+1
-        #     for {_k, {_, caller}} <- callers, do: send(caller, result)
-        #     parse_messages(state, rest, inf, prepared, total, total+1, [], 0)
-        #   {callers, inflight} ->
-        #     current = Enum.min(Map.keys(inflight))
-        #     for {_k, {_, caller}} <- callers, do: send(caller, result)
-        #     parse_messages(state, rest, inflight, prepared, total, current, [], 0)
-        # end
+        case :queue.out(inflight) do
+          {:empty, inflight} ->
+            parse_messages(state, rest, inflight, prepared, nil, queue, owner, [], 0)
+          {{:value, value}, inflight} ->
+            parse_messages(state, rest, inflight, prepared, value, queue, owner, [], 0)
+        end
+      <<?C, len::32, _payload::binary-size(len-4), rest::binary>> ->
+        if is_pid(owner), do: send_data(state, @sync)
+        parse_messages(state, rest, inflight, prepared, current, queue, owner, rows, count)
       <<?s, len::32, _payload::binary-size(len-4), rest::binary>> ->
-        %{^current => {_ref, _caller, _timestamp, sql}} = inflight
+        {_ref, _caller, _timestamp, sql} = current
         send_data(state, execute(sql, owner))
-        parse_messages(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
+        parse_messages(state, rest, inflight, prepared, current, queue, owner, rows, count)
       <<?K, 12::32, pid::32, secret::32, rest::binary>> ->
-        parse_messages(Map.put(Map.put(state, :secret, secret), :pid, pid), rest, inflight, prepared, total, current, queue, owner, rows, count)
-      <<?D, len::32, payload::binary-size(len-4), rest::binary>> when count == 999 and owner != nil ->
-        %{^current => {ref, caller, _timestamp, %{columns: columns, fn: fun, acc: acc}}} = inflight
-        {_, rows} = Enumerable.reduce([parse_data_row(payload, columns)|rows], acc, fun)
-        send caller, {ref, {:cont, rows}}
-        parse_messages(state, rest, inflight, prepared, total, current, queue, owner, [], 0)
+        parse_messages(Map.put(Map.put(state, :secret, secret), :pid, pid), rest, inflight, prepared, current, queue, owner, rows, count)
       <<?D, len::32, payload::binary-size(len-4), rest::binary>> ->
-        %{^current => {_ref, _caller, _timestamp, %{columns: columns}}} = inflight
-        parse_messages(state, rest, inflight, prepared, total, current, queue, owner, [parse_data_row(payload, columns)|rows], count+1)
-      <<?Z, len::32, _payload::binary-size(len-4), rest::binary>> when total == 0 and map_size(prepared) == 0 ->
+        case current do
+          {ref, caller, _timestamp, %{columns: columns, fn: fun, acc: acc, max_rows: max_rows}} when (max_rows*2)-1 == count and owner != nil ->
+            {_, rows} = Enumerable.reduce([parse_data_row(payload, columns)|rows], acc, fun)
+            send caller, {ref, {:cont, rows}}
+            parse_messages(state, rest, inflight, prepared, current, queue, owner, [], 0)
+
+          {_ref, _caller, _timestamp, %{columns: columns}} ->
+            parse_messages(state, rest, inflight, prepared, current, queue, owner, [parse_data_row(payload, columns)|rows], count+1)
+        end
+      <<?Z, len::32, _payload::binary-size(len-4), rest::binary>> when timezone == nil ->
+        state = %{state | timezone: true}
         send_data(state, @timezone)
+        handle_data(state, rest, inflight, prepared, current, queue, owner, rows, count)
+      <<?Z, len::32, _payload::binary-size(len-4), rest::binary>> when timezone != nil and current == nil ->
         case :persistent_term.get({SQL, :queries}, []) do
           [] ->
-            handle_data(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
+            handle_data(state, rest, inflight, prepared, current, queue, owner, rows, count)
           queries ->
             send_data(state, prepare(queries))
-            handle_data(state, rest, inflight, Enum.reduce(queries, prepared, &Map.put(&2, &1.name, true)), total, current, queue, owner, rows, count)
+            handle_data(state, rest, inflight, Enum.reduce(queries, prepared, &Map.put(&2, &1.name, true)), current, queue, owner, rows, count)
         end
       <<?Z, len::32, _payload::binary-size(len-4), rest::binary>> ->
-        parse_messages(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
+        parse_messages(state, rest, inflight, prepared, current, queue, owner, rows, count)
       <<?S, len::32, payload::binary-size(len-4), rest::binary>> ->
         [k, v, _] = :binary.split(payload, <<0>>, [:global])
-        parse_messages(%{state | parameter: Map.put(parameter, k, v)}, rest, inflight, prepared, total, current, queue, owner, rows, count)
+        parse_messages(%{state | parameter: Map.put(parameter, k, v)}, rest, inflight, prepared, current, queue, owner, rows, count)
       <<_tag::8, len::32, _payload::binary-size(len-4), rest::binary>> ->
-        parse_messages(state, rest, inflight, prepared, total, current, queue, owner, rows, count)
+        parse_messages(state, rest, inflight, prepared, current, queue, owner, rows, count)
       _ ->
-        loop(state, buffer, inflight, prepared, total, current, queue, owner, rows, count)
+        loop(state, buffer, inflight, prepared, current, queue, owner, rows, count)
     end
   end
 
@@ -328,26 +328,34 @@ defmodule SQL.Adapters.Postgres do
   end
 
   defp close(%{portal: portal, p_len: len}), do: <<?C,len+6::32,?P,portal::binary,0,?S,4::32-big>>
-  defp execute(%{portal: portal, p_len: len}, nil), do: <<?E,len+9::32,portal::binary,0,0::32-big,?S,4::32-big>>
-  defp execute(%{portal: portal, p_len: len}, _owner), do: <<?E,len+9::32,portal::binary,0,500::32-big,?S,4::32-big>>
+  defp execute(%{portal: portal, p_len: len, max_rows: max_rows}, _owner), do: <<?E,len+9::32,portal::binary,0,max_rows::32-big,?H,4::32-big>>
 
   defp prepare(queries), do: prepare(queries, [@sync])
   defp prepare([], acc), do: acc
   defp prepare([sql|rest], acc), do: prepare(rest, prepare(sql, acc))
-  defp prepare(%{name: name, string: string, params: _params, types: types, idx: idx}, acc) do
+  defp prepare(%{name: name, string: string, params: params, types: types}, acc) do
+    idx = length(params)
     len = 8+byte_size(name)+byte_size(string)+(4*idx)
     [<<?P,len::32-big,name::binary,0,string::binary,0,idx::16-big>>, (for p <- types, do: oid(p))|acc]
   end
 
-  defp bind(%{name: name, idx: idx, params: params, columns: _columns, c_len: c_len, types: types, portal: portal, p_len: len}, nil) do
+  defp bind(%{name: name, params: params, c_len: c_len, types: types, portal: portal, p_len: len}, nil) do
+    idx = length(params)
     params_bin = for {type, p} <- Enum.zip(types, params), into: "", do: encode(type, p)
     bind_len = 12+len+byte_size(name)+((idx+c_len)*2)+byte_size(params_bin)
-    <<?B, bind_len::32-big, portal::binary, 0, name::binary, 0, idx::16-big, formats(idx)::binary, idx::16-big, params_bin::binary, c_len::16-big, formats(c_len)::binary, ?E,len+9::32,portal::binary,0,0::32-big,?S,4::32-big>>
+    <<?B, bind_len::32-big, portal::binary, 0, name::binary, 0, idx::16-big, formats(idx)::binary, idx::16-big, params_bin::binary, c_len::16-big, formats(c_len)::binary,?E,len+9::32,portal::binary,0,0::32-big,?C,len+6::32,?P,portal::binary,0,?H,4::32-big>>
   end
-  defp bind(%{name: name, idx: idx, params: params, columns: _columns, c_len: c_len, types: types, portal: portal, p_len: len}, _owner) do
+  defp bind(%{name: name, params: params, c_len: c_len, types: types, portal: portal, p_len: len, max_rows: 0}, _owner) do
+    idx = length(params)
     params_bin = for {type, p} <- Enum.zip(types, params), into: "", do: encode(type, p)
     bind_len = 12+len+byte_size(name)+((idx+c_len)*2)+byte_size(params_bin)
-    <<?B, bind_len::32-big, portal::binary, 0, name::binary, 0, idx::16-big, formats(idx)::binary, idx::16-big, params_bin::binary, c_len::16-big, formats(c_len)::binary, ?E,len+9::32,portal::binary,0,500::32-big,?S,4::32-big>>
+    <<?B, bind_len::32-big, portal::binary, 0, name::binary, 0, idx::16-big, formats(idx)::binary, idx::16-big, params_bin::binary, c_len::16-big, formats(c_len)::binary,?E,len+9::32,portal::binary,0,0::32-big,?C,len+6::32,?P,portal::binary,0,?H,4::32-big>>
+  end
+  defp bind(%{name: name, params: params, c_len: c_len, types: types, portal: portal, p_len: len, max_rows: max_rows}, _owner) do
+    idx = length(params)
+    params_bin = for {type, p} <- Enum.zip(types, params), into: "", do: encode(type, p)
+    bind_len = 12+len+byte_size(name)+((idx+c_len)*2)+byte_size(params_bin)
+    <<?B, bind_len::32-big, portal::binary, 0, name::binary, 0, idx::16-big, formats(idx)::binary, idx::16-big, params_bin::binary, c_len::16-big, formats(c_len)::binary,?E,len+9::32,portal::binary,0,max_rows::32-big,?H,4::32-big>>
   end
 
   defp formats(0), do: ""
@@ -377,7 +385,6 @@ defmodule SQL.Adapters.Postgres do
   defp parse_data_row(<<len::32-signed, value::binary-size(len), rest::binary>>, [type|cols], acc, true=flag) do
     parse_data_row(rest, cols, [decode(type, value)|acc],flag)
   end
-
 
   defp decode({type, nil}, bin), do: decode(type, bin)
   defp decode(:array, <<0::32, _null_flag::32-big, _oid::32-big>>), do: []
@@ -633,12 +640,12 @@ defmodule SQL.Adapters.Postgres do
     end
     <<byte_size(bin)::32-big, bin::binary>>
   end
-  defp encode(:bool, true), do: <<1::32-big, 1>>
-  defp encode(:bool, false), do: <<1::32-big, 0>>
+  defp encode(type, true) when type in ~w[bool boolean]a, do: <<1::32-big, 1>>
+  defp encode(type, false) when type in ~w[bool boolean]a, do: <<1::32-big, 0>>
   defp encode(:xid8, v), do: <<8::32-big, v::unsigned-64-big>>
   defp encode(:"\"char\"", <<v::8>>), do: <<1::32-big, v::8>>
   defp encode(:int2, v), do: <<2::32-big, v::signed-16-big>>
-  defp encode(:int4, v), do: <<4::32-big, v::signed-32-big>>
+  defp encode(type, v) when type in ~w[int int4]a, do: <<4::32-big, v::signed-32-big>>
   defp encode(:int8, v), do: <<8::32-big, v::signed-64-big>>
   defp encode(:float4, v), do: <<4::32-big, v::float-32-big>>
   defp encode(:float8, v), do: <<8::32-big, v::float-64-big>>

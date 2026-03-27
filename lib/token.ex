@@ -10,9 +10,12 @@ defmodule SQL.Token do
   @doc since: "0.3.0"
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
-      @compile {:inline, to_iodata: 4, __to_iodata__: 4, indention: 3, indention: 4}
+      @compile {:inline, to_iodata: 4, __to_iodata__: 4, indention: 3, indention: 4, keyword: 2}
 
-      def to_iodata(token, %{format: format, case: case}), do: to_iodata(token, format, case, [])
+      def to_iodata(token, %{format: format, case: case, binding: binding}) do
+        Process.put(:sql_binding, binding)
+        to_iodata(token, format, case, [])
+      end
 
       defp to_iodata(token, format, case, acc), do: __to_iodata__(token, format, case, acc)
 
@@ -29,10 +32,13 @@ defmodule SQL.Token do
       defp indention(acc, format, line, 0=column), do: indention([?\n|acc], format, line-1, column)
       defp indention(acc, format, line, column), do: indention([?\s|acc], format, line, column-1)
 
+      defp keyword(:upper, value), do: String.upcase(Atom.to_string(value))
+      defp keyword(:lower, value), do: Atom.to_string(value)
+
       {reserved, non_reserved, operators} = SQL.BNF.get_rules()
       for atom <- Enum.uniq(Enum.map(reserved++non_reserved++operators,&elem(&1, 0))) do
         defp __to_iodata__(unquote(atom), _format, case, acc) do
-          [if(case == :upper, do: unquote(String.upcase("#{atom}")), else: unquote("#{atom}"))|acc]
+          [keyword(case, unquote(atom))|acc]
         end
       end
       defp __to_iodata__(:comma, _format, _case, acc) do
@@ -52,9 +58,6 @@ defmodule SQL.Token do
       end
       defp __to_iodata__({:comma, m, values}, format, case, acc) do
         indention([?,|to_iodata(values, format, case, acc)], format, m)
-      end
-      defp __to_iodata__({:binding, m, _}, format, _case, acc) do
-        indention([??|acc], format, m)
       end
       defp __to_iodata__({:comment, m, value}, format, _case, acc) do
         indention([?-,?-,value|acc], format, m)
@@ -113,11 +116,8 @@ defmodule SQL.Token do
       defp __to_iodata__({:double_quote, m, value}=node, format, _case, acc) do
         indention([?", value, ?"|acc], format, m)
       end
-      defp __to_iodata__(atom, _format, :lower, acc) when is_atom(atom) do
-        ["#{atom}"|acc]
-      end
-      defp __to_iodata__(atom, _format, :upper, acc) when is_atom(atom) do
-        [String.upcase("#{atom}")|acc]
+      defp __to_iodata__(atom, _format, case, acc) when is_atom(atom) do
+        [keyword(case, atom)|acc]
       end
       defp __to_iodata__([token|tokens], format, case, acc) do
         to_iodata(token, format, case, to_iodata(tokens, format, case, acc))

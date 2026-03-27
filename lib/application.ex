@@ -3,21 +3,26 @@
 
 defmodule SQL.Application do
   @moduledoc false
+  import SQL
 
   def start(_type, _args) do
     pools = Application.get_env(:sql, :pools, [])
     children = for {name, opts} <- pools do
-      # :persistent_term.put(name, List.to_tuple(for n <- 1..:erlang.system_info(:schedulers_online), do: :"#{name}_#{n}"))
       {SQL.Pool, Map.put(Map.new(opts), :name, name)}
     end
-    result = {:ok, _sup} = Supervisor.start_link(children, strategy: :one_for_all)
+    result = {:ok, _sup} = Supervisor.start_link(children, strategy: :one_for_one)
     for {name, opts} <- pools do
       pid = Process.whereis(name)
       children = Supervisor.which_children(pid)
       pids = Enum.reverse(Enum.map(children, fn {_id, pid, _type, _mod} -> pid end))
       :persistent_term.put(name, List.to_tuple(pids))
-      :persistent_term.put({name, :oids}, Mix.Tasks.Sql.Get.oids({name, Map.new(opts)}))
-      # :persistent_term.put({name, :types}, {Mix.Tasks.Sql.Get.get(key), Mix.Tasks.Sql.Get.columns(key), Mix.Tasks.Sql.Get.enums(key), Mix.Tasks.Sql.Get.oids(key), Mix.Tasks.Sql.Get.functions(key)})
+      config = {name, Map.new(opts)}
+      SQL.begin(:transaction, name)
+      oids = Mix.Tasks.Sql.Get.oids(config)
+      get = Mix.Tasks.Sql.Get.get(config)
+      SQL.commit(:transaction)
+      :persistent_term.put({name, :oids}, oids)
+      :persistent_term.put({name, :columns}, get)
     end
     result
   end

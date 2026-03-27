@@ -7,9 +7,9 @@ defmodule SQL.Lexer do
   @zero "illegal zero width character"
   @bidi "illegal bidi character"
   @cgj "illegal cgj character"
-  @context %{idx: 0, file: "nofile", binding: [], types: [], aliases: [], errors: [], module: nil, format: :static, case: :lower, validate: nil, description: nil, columns: nil}
-  def lex(binary, <<file::binary>> \\ "nofile", idx \\ 0) do
-    case lex(binary, %{@context | file: file, idx: idx}, 0, 0, 0, 0, []) do
+  @context %{file: "nofile", binding: 0, types: [], aliases: [], errors: [], module: nil, format: :static, case: :lower, validate: nil, description: nil, columns: nil}
+  def lex(binary, <<file::binary>> \\ "nofile") do
+    case lex(binary, %{@context | file: file}, 0, 0, 0, 0, []) do
       {:error, error} -> raise TokenMissingError, [{:snippet, binary} | error]
       {:error, :zero_width, l, c} -> raise SyntaxError, [description: @zero, file: file, line: l, column: c]
       {:error, :bidi, l, c} -> raise SyntaxError, [description: @bidi, file: file, line: l, column: c]
@@ -704,9 +704,8 @@ defmodule SQL.Lexer do
       <<?}, ?}, rest::binary>> when n == 0 ->
         end_line = l+line
         end_column = c+column+2
-        idx = context.idx+1
         value = Code.string_to_quoted!(:lists.reverse(data), file: context.file, line: line, column: column, columns: true, token_metadata: true, existing_atoms_only: true)
-        lex(rest, %{context|idx: idx, binding: [value|context.binding]}, end_line, end_column, end_line, end_column, node(:binding, :binding, l, c, end_line, end_column, ol, oc, context, [idx], acc))
+        lex(rest, %{context | binding: context.binding+1}, end_line, end_column, end_line, end_column, node(:binding, :binding, l, c, end_line, end_column, ol, oc, context, [value], acc))
       <<?}, rest::binary>> -> double_brace(rest, [?}|data], l, c, n-1, context, line, column+1, ol, oc, acc)
       <<b, rest::binary>> -> double_brace(rest, [b|data], l, c, n, context, line, column+1, ol, oc, acc)
       "" -> {:error, file: context.file, end_line: l, end_column: c, line: l+line, column: c+column, opening_delimiter: :"{", expected_delimiter: :"}"}
