@@ -6,7 +6,7 @@ defmodule SQL.Pool do
   use Supervisor
 
   @derive {Inspect, only: []}
-  defstruct [ssl: false, timeout: 15_000, max_rows: 500, parameter: %{}, name: :default, domain: :inet, type: :stream, protocol: :tcp, use_registry: false, debug: false, otp: %{rcvbuf: {64_000, 128_000}}, socket: %{keepalive: true, linger: %{onoff: true, linger: 5}}, family: :inet, port: 5432, addr: {127, 0, 0, 1}, scheduler_id: nil, label: nil, adapter: nil, username: nil, password: nil, hostname: nil, database: nil, timezone: nil]
+  defstruct [ssl: false, timeout: 15_000, parameter: %{}, name: :default, domain: :inet, type: :stream, protocol: :tcp, use_registry: false, debug: false, otp: %{rcvbuf: {64_000, 128_000}}, socket: %{keepalive: true, linger: %{onoff: true, linger: 5}}, family: :inet, port: 5432, addr: {127, 0, 0, 1}, scheduler_id: nil, adapter: nil, username: nil, password: nil, hostname: nil, database: nil, timezone: nil]
 
   def start_link(opts) do
     state = struct(__MODULE__, opts)
@@ -19,7 +19,7 @@ defmodule SQL.Pool do
       for n <- 1..:erlang.system_info(:schedulers_online) do
         %{
           id: make_ref(),
-          start: {state.adapter, :start, [struct(state, scheduler_id: n, label: :"#{state.name}_#{n}")]},
+          start: {state.adapter, :start, [struct(state, scheduler_id: n)]},
           restart: :permanent,
           shutdown: 5000,
           type: :worker,

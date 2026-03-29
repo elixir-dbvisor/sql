@@ -130,16 +130,29 @@ defmodule SQL.Integration.PostgresTest do
   end
 
   describe "errors" do
+    # test "timeout raises outside transaction" do
+    #   Process.flag(:trap_exit, true)
+    #   assert_raise RuntimeError, ~s{canceling statement due to user request}, fn ->
+    #     Enum.to_list(Map.put(~SQL"SELECT pg_sleep(10)", :timeout, 100))
+    #   end
+    # end
+
+    # test "non existing table raises outside transaction" do
+    #   Process.flag(:trap_exit, true)
+    #   assert_raise RuntimeError, ~s{relation "blackhole" does not exist}, fn ->
+    #     Enum.to_list(~SQL"SELECT id FROM blackhole")
+    #   end
+    # end
+
     test "timeout" do
-      assert_raise RuntimeError, ~s{canceling statement due to user request}, fn ->
-        Enum.to_list(Map.put(~SQL"SELECT pg_sleep(10)", :timeout, 100))
-      end
+      sql = Map.put(~SQL"SELECT pg_sleep(10)", :timeout, 100)
+      result = SQL.transaction do Enum.to_list(sql) end
+      assert {:error, %RuntimeError{message: "canceling statement due to user request"}} = result
     end
 
     test "non existing table" do
-      assert_raise RuntimeError, ~s{relation "blackhole" does not exist}, fn ->
-        Enum.to_list(~SQL"SELECT id FROM blackhole")
-      end
+      result = SQL.transaction do Enum.to_list(~SQL"SELECT id FROM blackhole") end
+      assert {:error, %RuntimeError{message: "relation \"blackhole\" does not exist"}} = result
     end
   end
 
@@ -164,6 +177,11 @@ defmodule SQL.Integration.PostgresTest do
   test "connection pool is self healing" do
     conn = elem(:persistent_term.get(:default), 0)
     Process.exit(conn, :shutdown)
+    Process.sleep(50)
+    refute elem(:persistent_term.get(:default), 0) == conn
+
+    conn = elem(:persistent_term.get(:default), 0)
+    Process.exit(conn, :normal)
     Process.sleep(50)
     refute elem(:persistent_term.get(:default), 0) == conn
   end

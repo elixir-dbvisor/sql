@@ -8,7 +8,7 @@ config :sql, pools: [
     username: "postgres",
     password: "postgres",
     hostname: "localhost",
-    database: "sql_test#{System.get_env("MIX_TEST_PARTITION")}",
+    database: "sql_dev",
     adapter: SQL.Adapters.Postgres,
     ssl: false
   ]

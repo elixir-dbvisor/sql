@@ -52,7 +52,7 @@ defmodule SQL.Repo do
   end
 
   def ecto(:statement) do
-    SQL.Repo.all(select(from("users"), [1]))
+    SQL.Repo.query("SELECT 1", [])
   end
   def ecto(:empty) do
     SQL.Repo.transaction(fn ->
@@ -61,13 +61,13 @@ defmodule SQL.Repo do
   end
   def ecto(:transaction) do
     SQL.Repo.transaction(fn ->
-      SQL.Repo.all(select(from("users"), [1]))
+      SQL.Repo.query("SELECT 1", [])
     end)
   end
   def ecto(:savepoint) do
     SQL.Repo.transaction(fn ->
       SQL.Repo.transaction(fn ->
-        SQL.Repo.all(select(from("users"), [1]))
+        SQL.Repo.query("SELECT 1", [])
       end)
     end)
   end
