@@ -5,10 +5,12 @@
 
 # Changelog
 
-## v0.5.0 (2025-XX-XX)
+## v0.5.0 (2026-03-XX)
 
 ### Enhancement
-
+ - SQL are now self-hosted with its own PostgreSQL driver and connection pool.
+ - Added `SQL.transaction/1`
+ - Added `SQL.stream/2`
 
 ## v0.4.0 (2025-10-18)
 
