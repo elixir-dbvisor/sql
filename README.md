@@ -77,7 +77,9 @@ For custom mapping of rows:
 
 ```elixir
 SQL.transaction do
-  Stream.run(~SQL"SELECT g, repeat(md5(g::text), 4) FROM generate_series(1, 5000000) AS g")
+  ~SQL"SELECT g, repeat(md5(g::text), 4) FROM generate_series(1, 5000000) AS g"
+  |> SQL.stream()
+  |> Stream.run()
 end
 ```
 
@@ -89,7 +91,7 @@ end
       username: "postgres",
       password: "postgres",
       hostname: "localhost",
-      database: "mydatabase",
+      database: "sql",
       adapter: SQL.Adapters.Postgres,
       ssl: false
     ]
@@ -131,13 +133,13 @@ Run `mix sql.get` to generate your `sql.lock` file for error reporting.
       email = 'john@example.com'
     """
     lib/myapp.ex:18: Myapp.list_users/0
-    (sql 0.4.0) lib/sql.ex:225: SQL.__inspect__/3
-    (sql 0.4.0) lib/sql.ex:115: SQL.build/4
-    (elixir 1.20.0-dev) src/elixir_dispatch.erl:263: :elixir_dispatch.expand_macro_fun/7
-    (elixir 1.20.0-dev) src/elixir_dispatch.erl:122: :elixir_dispatch.dispatch_import/6
-    (elixir 1.20.0-dev) src/elixir_clauses.erl:192: :elixir_clauses.def/3
-    (elixir 1.20.0-dev) src/elixir_def.erl:218: :elixir_def."-store_definition/10-lc$^0/1-0-"/3
-    (elixir 1.20.0-dev) src/elixir_def.erl:219: :elixir_def.store_definition/10
+    (sql 0.5.0) lib/sql.ex:225: SQL.__inspect__/3
+    (sql 0.5.0) lib/sql.ex:115: SQL.build/4
+    (elixir 1.20.0) src/elixir_dispatch.erl:263: :elixir_dispatch.expand_macro_fun/7
+    (elixir 1.20.0) src/elixir_dispatch.erl:122: :elixir_dispatch.dispatch_import/6
+    (elixir 1.20.0) src/elixir_clauses.erl:192: :elixir_clauses.def/3
+    (elixir 1.20.0) src/elixir_def.erl:218: :elixir_def."-store_definition/10-lc$^0/1-0-"/3
+    (elixir 1.20.0) src/elixir_def.erl:219: :elixir_def.store_definition/10
 ```
 
 ## Benchmark: Extreme Concurrency & Diagonal Scaling
