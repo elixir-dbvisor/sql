@@ -12,6 +12,7 @@ defmodule SQL.Token do
     quote bind_quoted: [opts: opts] do
       @compile {:inline, to_iodata: 4, __to_iodata__: 4, indention: 3, indention: 4, keyword: 2}
 
+      @doc false
       def to_iodata(token, %{format: format, case: case, binding: binding}) do
         Process.put(:sql_binding, binding)
         to_iodata(token, format, case, [])
