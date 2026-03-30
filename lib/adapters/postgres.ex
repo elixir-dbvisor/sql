@@ -13,6 +13,7 @@ defmodule SQL.Adapters.Postgres do
   @sync <<?S, 4::32-big>>
   @ssl <<8::32, 80877103::32>>
 
+  @doc false
   def start(state) do
     pid = spawn_link(fn -> init(state) end)
     case :persistent_term.get(state.name, nil) do
@@ -616,11 +617,10 @@ defmodule SQL.Adapters.Postgres do
     decode_array(rest, type, part, n-1, total, [decode(type, data)|acc])
   end
 
-  def decode_record(<<>>, _types, 0, acc), do: Enum.reverse(acc)
-  def decode_record(<<_::32-big, -1::32-signed-big, rest::binary>>, [_|types], count, acc), do: decode_record(rest, types, count-1, [nil|acc])
-  def decode_record(<<_::32-big, len::32-big, data::binary-size(len), rest::binary>>, [{type, _col}|types], count, acc) when type not in ~w[array record]a, do: decode_record(rest, types, count-1, [decode(type, data)|acc])
-  def decode_record(<<_::32-big, len::32-big, data::binary-size(len), rest::binary>>, [type|types], count, acc), do: decode_record(rest, types, count-1, [decode(type, data)|acc])
-
+  defp decode_record(<<>>, _types, 0, acc), do: Enum.reverse(acc)
+  defp decode_record(<<_::32-big, -1::32-signed-big, rest::binary>>, [_|types], count, acc), do: decode_record(rest, types, count-1, [nil|acc])
+  defp decode_record(<<_::32-big, len::32-big, data::binary-size(len), rest::binary>>, [{type, _col}|types], count, acc) when type not in ~w[array record]a, do: decode_record(rest, types, count-1, [decode(type, data)|acc])
+  defp decode_record(<<_::32-big, len::32-big, data::binary-size(len), rest::binary>>, [type|types], count, acc), do: decode_record(rest, types, count-1, [decode(type, data)|acc])
 
   defp decode_composite(<<>>, 0, acc), do: List.to_tuple(Enum.reverse(acc))
   defp decode_composite(<<-1::32-signed-big, rest::binary>>, count, acc) do
