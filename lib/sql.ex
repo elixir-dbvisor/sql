@@ -80,7 +80,7 @@ defmodule SQL do
   Perform transformation on the result set.
 
   ## Examples
-      iex(1)> SQL.map(~SQL"from users select id, email", fn row, columns -> Map.new(Enum.zip(columns, row)) end)
+      iex(1)> SQL.map(~SQL"from users select id, email", &IO.inspect/1)
       ~SQL\"\"\"
       select
         id,
@@ -192,9 +192,19 @@ defmodule SQL do
     end
   end
 
-  @doc false
+  @doc """
+  Returns a lazy enumerable.
+
+  ## Examples
+      iex(1)> SQL.transaction, do: ~SQL"from users select id, email" |> SQL.stream() |> Stream.run()
+  """
   @doc since: "0.5.0"
-  def stream(%SQL{} = sql, max_rows: max_rows), do: %{sql | max_rows: max_rows}
+  defmacro stream(sql, opts \\ [max_rows: 500]) do
+    max_rows = Keyword.fetch!(opts, :max_rows)
+    quote do
+      %{unquote(sql) | max_rows: unquote(max_rows)}
+    end
+  end
 
   @doc false
   @doc since: "0.1.0"
@@ -255,6 +265,7 @@ defmodule SQL do
     end
   end
 
+  @doc false
   def eval([], _binding, _env, acc), do: acc
   def eval([value|rest], binding, env, acc) do
     eval(rest, binding, env, [eval(value, binding, env)|acc])
@@ -328,7 +339,10 @@ defmodule SQL do
 
   @doc false
   def plan(tokens, context, id, stack, columns) do
-    key = {context.module, id, :plan}
+    __plan__(tokens, context, {context.module, id, :plan}, stack, columns)
+  end
+
+  defp __plan__(tokens, context, key, stack, columns) do
     case :persistent_term.get(key, nil) do
       nil ->
         {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
@@ -365,6 +379,7 @@ defmodule SQL do
     {k, v}, acc -> [acc|["  the relation ",@error,k,@reset," is mentioned #{length(v)} times but does not exist\n"]]
   end)
 
+  @doc false
   def reduce(%SQL{fn: nil} = sql, acc, fun) do
     reduce(%{sql | fn: fn row, acc -> fun.(row, acc) end, acc: acc})
   end
@@ -406,6 +421,7 @@ defmodule SQL do
     end
   end
 
+  @doc false
   def conn(%SQL{pool: pool}), do: pick(pool)
   def conn(pool), do: pick(pool)
 
@@ -425,6 +441,7 @@ defmodule SQL do
         conn -> conn
       end
     end
+    @doc false
     def transaction() do
       Process.get(SQL.Transaction) || __conn__()
     end
@@ -432,6 +449,7 @@ defmodule SQL do
     defp conn() do
       Process.get(SQL.Conn)
     end
+    @doc false
     def transaction() do
       Process.get(SQL.Transaction)
     end

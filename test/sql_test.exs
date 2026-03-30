@@ -43,6 +43,16 @@ defmodule SQLTest do
     assert ["id"] == Enum.map([[id: "id", email: "email", inserted_at: "inserted_at", updated_at: "updated_at"]], fn row -> sql.fn.(row) end)
   end
 
+  test "stream/2" do
+    sql =
+    from()
+    |> ~SQL[select id, email, inserted_at, updated_at]
+    |> where()
+    |> SQL.stream()
+
+    assert 500 == sql.max_rows
+    assert 1000 == SQL.stream(sql, max_rows: 1000).max_rows
+  end
 
   test "inspect/1" do
     assert ~s(\e[0m~SQL\"\"\"\n\e[35mselect\e[0m\n  \e[35m+\e[0m\e[33m1000\e[0m\n\"\"\") == inspect(~SQL[select +1000])
