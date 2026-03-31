@@ -5,7 +5,7 @@
 
 # Changelog
 
-## v0.5.0 (2026-03-XX)
+## v0.5.0 (2026-03-31)
 
 ### Enhancement
  - SQL are now self-hosted with its own PostgreSQL driver and connection pool.

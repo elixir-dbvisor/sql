@@ -90,8 +90,8 @@ defmodule SQL do
       \"\"\"
   """
   @doc since: "0.4.0"
-  defmacro map(left, right) do
-    SQL.build(left, right, __CALLER__)
+  defmacro map(sql, fun) do
+    SQL.build(sql, fun, __CALLER__)
   end
 
   @doc """
