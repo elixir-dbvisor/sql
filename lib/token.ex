@@ -13,6 +13,19 @@ defmodule SQL.Token do
       @compile {:inline, to_iodata: 4, __to_iodata__: 4, indention: 3, indention: 4, keyword: 2}
 
       @doc false
+      def static(tokens, context, t, types, params, id, max_rows) do
+        static(tokens, t, types, params, context.binding, id, max_rows, IO.iodata_to_binary(to_iodata(tokens, context)))
+      end
+
+      defp static(_tokens, _t, _types, _params, _count, _id, _max_rows, string) do
+        {string, nil, [], []}
+      end
+
+      def dynamic(_types, _params, _count, acc) do
+        acc
+      end
+
+      @doc false
       def to_iodata(token, %{format: format, case: case, binding: binding}) do
         Process.put(:sql_binding, binding)
         to_iodata(token, format, case, [])
@@ -66,6 +79,12 @@ defmodule SQL.Token do
       defp __to_iodata__({:comments, m, value}, format, _case, acc) do
         indention([?\\,?*,value,?*,?\\|acc], format, m)
       end
+      defp __to_iodata__({:double_quote, m, [l, {:ident, [], value}]}=node, format, case, acc) do
+        to_iodata(l, format, case, indention([?", value, ?"|acc], format, m))
+      end
+      defp __to_iodata__({:quote, m, [l, {:ident, [], value}]}=node, format, case, acc) do
+        to_iodata(l, format, case, indention([?', value, ?'|acc], format, m))
+      end
       defp __to_iodata__({:quote, m, value}, format, _case, acc) do
         indention([?',value,?'|acc], format, m)
       end
@@ -102,7 +121,7 @@ defmodule SQL.Token do
       defp __to_iodata__({tag, [{_, {l,c,_,_,_,_}}|_]=m, [{_, [{_, {ll,cc,_,_,_,_}}|_], _}]=values}, format, case, acc) when l >= ll and c >= cc do
         to_iodata(values, format, case, indention(to_iodata(tag, format, case, acc), format, m))
       end
-      defp __to_iodata__({tag, [_,{_, type}|_]=m, [left, right]}, format, case, acc) when type == :operator or tag in ~w[between cursor for to union except intersect over]a do
+      defp __to_iodata__({tag, [_,{_, type}|_]=m, [left, right]}, format, case, acc) when type == :operator or tag in ~w[between cursor for to union except intersect over uescape]a do
         to_iodata(left, format, case, indention(to_iodata(tag, format, case, to_iodata(right, format, case, acc)), format, m))
       end
       defp __to_iodata__({:ident, m, value}=node, format, :upper, acc) do
@@ -111,7 +130,7 @@ defmodule SQL.Token do
       defp __to_iodata__({tag, m, [{_,_,_}|_]=values}, format, case, acc) do
         indention(to_iodata(tag, format, case, to_iodata(values, format, case, acc)), format, m)
       end
-      defp __to_iodata__({tag, m, value}=node, format, _case, acc) when tag in ~w[ident numeric special]a do
+      defp __to_iodata__({tag, m, value}=node, format, _case, acc) when tag in ~w[ident numeric integer special]a do
         indention([value|acc], format, m)
       end
       defp __to_iodata__({:double_quote, m, value}=node, format, _case, acc) do
@@ -127,7 +146,7 @@ defmodule SQL.Token do
         acc
       end
 
-      defoverridable to_iodata: 4
+      defoverridable to_iodata: 4, static: 8, dynamic: 4
     end
   end
 end

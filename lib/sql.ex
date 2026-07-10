@@ -17,21 +17,22 @@ defmodule SQL do
       import SQL
       pool = opts[:pool] || :default
       {_, config} = Enum.find(Application.compile_env(:sql, :pools, []), fn {p, _opts} -> p == pool end)
-      config = Map.new(Keyword.merge([case: :lower, columns: [], adapter: config[:adapter] || ANSI, validate: fn _, _ -> true end],  opts))
+      config = Map.new(Keyword.merge([case: :lower, columns: [], adapter: opts[:adapter] || config[:adapter] || ANSI, validate: fn _, _ -> true end],  opts))
       @external_resource Path.relative_to_cwd("sql.lock")
       config = with true <- File.exists?(Path.relative_to_cwd("sql.lock")),
                     %{validate: validate, columns: columns} <- elem(Code.eval_file("sql.lock", File.cwd!()), 0) do
                     %{config | validate: validate, columns: columns}
                else
                 _  ->
-                  %{config | columns: :persistent_term.get({pool, :columns})}
+                  %{config | columns: :persistent_term.get({pool, :columns}, %{})}
                end
       Module.put_attribute(__MODULE__, :sql_config, config)
+      Module.put_attribute(__MODULE__, :sql_adapter, config.adapter)
       Module.put_attribute(__MODULE__, :sql_pool, pool)
     end
   end
 
-  defstruct [tokens: [], idx: 0, params: [], module: nil, id: nil, string: nil, inspect: nil, fn: nil, context: nil, name: nil, columns: [], c_len: 0, types: [], pool: :default, portal: nil, p_len: 0, timeout: nil, acc: nil, max_rows: 0]
+  defstruct [tokens: [], params: [], columns: [], types: nil, decoder: nil, adapter: nil, module: nil, id: nil, string: nil, inspect: nil, fn: nil, context: nil, pool: :default, db_timeout: 15000, msg: nil, max_rows: 0, acc: nil, queue_timeout: 250]
 
   defimpl Inspect, for: SQL do
     def inspect(%{inspect: nil, tokens: tokens, context: context}, _opts) do
@@ -104,42 +105,53 @@ defmodule SQL do
   defmacro transaction(do: block) do
     key = __CALLER__.function
     pool = Module.get_attribute(__CALLER__.module, :sql_pool, :default)
-    quote do
+    timeout = Module.get_attribute(__CALLER__.module, :sql_queue_timeout, 250)
+    adapter = Module.get_attribute(__CALLER__.module, :sql_adapter, ANSI)
+    quote generated: true do
       caller = self()
       ref = make_ref()
       case :persistent_term.get(unquote(key), SQL.transaction()) do
         nil ->
-          conn = conn(unquote(pool))
-          Process.put(SQL.Transaction, {caller, conn})
-          send conn, {ref, caller, System.monotonic_time(), ~SQL[begin]}
-          receive do
-            {^ref, :begin} ->
+          {metrics, sockets, state, queue, _prepared} = :persistent_term.get(unquote(pool))
+          case SQL.Pool.checkout(metrics, queue, state, unquote(timeout)) do
+            {:error, :timeout} = error -> error
+            {slot, monitor} ->
+              [{^slot, socket, conn}] = :ets.lookup(sockets, slot)
+              Process.put(SQL.Transaction, {caller, socket, conn})
+              Enum.to_list(~SQL[begin])
               try do
                 result = unquote(block)
-                send conn, {ref, caller, System.monotonic_time(), ~SQL[commit]}
+                Enum.to_list(~SQL[commit])
                 Process.delete(SQL.Transaction)
-                result
+                send monitor, :release
+                SQL.Pool.dequeue(metrics, queue, state, slot)
+                case result do
+                  {status, _} when status in ~w[error ok]a -> result
+                  result -> {:ok, result}
+                end
               rescue
                 e ->
-                  send conn, {ref, caller, System.monotonic_time(), ~SQL[rollback]}
+                  Enum.to_list(~SQL[rollback])
                   Process.delete(SQL.Transaction)
+                  send monitor, :release
+                  SQL.Pool.dequeue(metrics, queue, state, slot)
                   {:error, e}
               end
           end
-        {owner, conn} = state ->
+        _ ->
           id = "sp_#{:erlang.unique_integer([:positive])}"
-          send conn, {owner, {ref, caller, System.monotonic_time(), parse("savepoint #{id}")}}
-          receive do
-            {^ref, :begin} ->
-              try do
-                result = unquote(block)
-                send conn, {owner, {ref, caller, System.monotonic_time(), parse("release savepoint #{id}")}}
-                result
-              rescue
-                e ->
-                send conn, {owner, {ref, caller, System.monotonic_time(), parse("rollback to savepoint #{id}")}}
-                {:error, e}
-              end
+          Enum.to_list(parse("savepoint #{id}", [], unquote(adapter), 0, unquote(pool)))
+          try do
+            result = unquote(block)
+            Enum.to_list(parse("release savepoint #{id}", [], unquote(adapter), 0, unquote(pool)))
+            case result do
+              {status, _} when status in ~w[error ok]a -> result
+              result -> {:ok, result}
+            end
+          rescue
+            e ->
+            Enum.to_list(parse("rollback to savepoint #{id}", [], unquote(adapter), 0, unquote(pool)))
+            {:error, e}
           end
       end
     end
@@ -147,47 +159,52 @@ defmodule SQL do
 
   @doc false
   @doc since: "0.5.0"
-  defmacro begin(key \\ __CALLER__.function, pool \\ Module.get_attribute(__CALLER__.module, :sql_pool)) do
-    quote do
-      ref = make_ref()
-      owner = self()
-      conn = conn(unquote(pool))
-      state = {owner, conn}
-      :persistent_term.put({unquote(key), :ref}, ref)
-      :persistent_term.put(unquote(key), state)
-      :persistent_term.put({SQL.Conn, owner}, state)
-      Process.put(SQL.Transaction, {owner, conn})
-      send conn, {ref, owner, System.monotonic_time(), ~SQL[begin]}
-      receive do
-        {^ref, :begin} -> :ok
+  defmacro begin(key \\ __CALLER__.function, pool \\ Module.get_attribute(__CALLER__.module, :sql_pool), adapter \\ Module.get_attribute(__CALLER__.module, :sql_adapter), timeout \\ Module.get_attribute(__CALLER__.module, :sql_queue_timeout, 250)) do
+    quote bind_quoted: [pool: pool, key: key, ref_key: {key, :ref}, adapter: adapter, timeout: timeout] do
+      {metrics, sockets, state, queue, _prepared} = :persistent_term.get(pool)
+      case SQL.Pool.checkout(metrics, queue, state, timeout) do
+        {:error, :timeout} -> raise RuntimeError, "timeout"
+        {slot, monitor} ->
+          owner = self()
+          [{^slot, socket, conn}] = :ets.lookup(sockets, slot)
+          :persistent_term.put(key, {owner, slot, monitor, socket, conn})
+          Process.put(SQL.Transaction, {owner, socket, conn})
+          :persistent_term.put({SQL.Conn, owner}, {owner, socket, conn})
+          Enum.to_list(SQL.parse("begin", [], adapter, 0, pool))
       end
     end
   end
 
   @doc false
   @doc since: "0.5.0"
-  defmacro rollback(key \\ __CALLER__.function) do
-    quote do
-      {owner, conn} = :persistent_term.get(unquote(key))
-      send conn, {:persistent_term.get({unquote(key), :ref}), owner, System.monotonic_time(), ~SQL[rollback]}
+  defmacro rollback(key \\ __CALLER__.function, pool \\ Module.get_attribute(__CALLER__.module, :sql_pool), adapter \\ Module.get_attribute(__CALLER__.module, :sql_adapter)) do
+    quote bind_quoted: [key: key, ref_key: {key, :ref}, pool: pool, adapter: adapter] do
+      {metrics, sockets, state, queue, _prepared} = :persistent_term.get(pool)
+      {owner, slot, monitor, socket, conn} = :persistent_term.get(key)
+      Process.put(SQL.Transaction, {owner, socket, conn})
+      Enum.to_list(SQL.parse("rollback", [], adapter, 0, pool))
       :persistent_term.erase({SQL.Conn, owner})
-      :persistent_term.erase(unquote(key))
-      :persistent_term.erase({unquote(key), :ref})
+      :persistent_term.erase(key)
       Process.delete(SQL.Transaction)
+      send monitor, :release
+      SQL.Pool.dequeue(metrics, queue, state, slot)
       :ok
     end
   end
 
   @doc false
   @doc since: "0.5.0"
-  defmacro commit(key \\ __CALLER__.function) do
-    quote do
-      {owner, conn} = :persistent_term.get(unquote(key))
-      send conn, {:persistent_term.get({unquote(key), :ref}), owner, System.monotonic_time(), ~SQL[commit]}
+  defmacro commit(key \\ __CALLER__.function, pool \\ Module.get_attribute(__CALLER__.module, :sql_pool), adapter \\ Module.get_attribute(__CALLER__.module, :sql_adapter)) do
+    quote bind_quoted: [key: key, ref_key: {key, :ref}, pool: pool, adapter: adapter] do
+      {metrics, sockets, state, queue, _prepared} = :persistent_term.get(pool)
+      {owner, slot, monitor, socket, conn} = :persistent_term.get(key)
+      Process.put(SQL.Transaction, {owner, socket, conn})
+      Enum.to_list(SQL.parse("commit", [], adapter, 0, pool))
       :persistent_term.erase({SQL.Conn, owner})
-      :persistent_term.erase(unquote(key))
-      :persistent_term.erase({unquote(key), :ref})
+      :persistent_term.erase(key)
       Process.delete(SQL.Transaction)
+      send monitor, :release
+      SQL.Pool.dequeue(metrics, queue, state, slot)
       :ok
     end
   end
@@ -208,13 +225,14 @@ defmodule SQL do
 
   @doc false
   @doc since: "0.1.0"
-  def parse(binary, binding \\ [], module \\ ANSI) do
+  def parse(binary, binding \\ [], adapter \\ ANSI, max_rows \\ 0, pool \\ :default, fun \\ nil) do
     {:ok, context, tokens} = SQL.Lexer.lex(binary)
     {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
-    {:ok, columns, c_len, types, params} = SQL.Parser.describe(tokens, [])
-    id = :erlang.phash2(tokens)
-    portal = "p_#{:erlang.unique_integer([:positive])}"
-    struct(SQL, id: id, name: "sql_#{id}", tokens: tokens, context: context, string: IO.iodata_to_binary(module.to_iodata(tokens, context)), types: types, params: eval(params, binding, __ENV__, []), columns: columns, c_len: c_len, portal: portal, p_len: byte_size(portal))
+    {:ok, t, c, types, params} = SQL.Parser.describe(tokens, [])
+    id = :erlang.phash2({adapter, binary})
+    {string, decoder, encoder, acc} = adapter.static(tokens, %{context | module: adapter}, t, types, params, id, max_rows)
+    {params, _, _} = Code.eval_quoted_with_env(encoder, binding, Code.env_for_eval(__ENV__))
+    struct(SQL, id: id, params: params, columns: c, msg: adapter.dynamic(types, params, length(t), acc), decoder: decoder, types: t, adapter: adapter, fn: fun, pool: pool, tokens: tokens, string: string, context: context)
   end
 
   @doc false
@@ -222,78 +240,67 @@ defmodule SQL do
     config = %{case: :lower, adapter: Application.get_env(:sql, :adapter, ANSI), validate: fn _, _ -> true end}
     config = if env.module, do: Module.get_attribute(env.module, :sql_config, config), else: config
     columns = Map.get(config, :columns, [])
-    sql = struct(SQL, module: env.module)
+    sql = struct(SQL, module: env.module, adapter: config.adapter)
     stack = if env.function do
               {env.module, elem(env.function, 0), elem(env.function, 1), [file: Path.relative_to_cwd(env.file), line: env.line]}
             else
               {env.module, env.function, 0, [file: Path.relative_to_cwd(env.file), line: env.line]}
             end
     case build(left, right) do
-      {:static, data} ->
-        id = id(data)
+      {:static, data, max_rows} ->
+        id = id(data, config.adapter)
         {:ok, context, tokens} = SQL.Lexer.lex(data, env.file)
         {:ok, context, tokens} = SQL.Parser.parse(tokens, %{context|validate: config.validate, module: config.adapter, case: config.case})
-        {:ok, columns, c_len, types, params} = SQL.Parser.describe(tokens, columns)
-        string = IO.iodata_to_binary(context.module.to_iodata(tokens, context))
+        {:ok, t, c, types, params} = SQL.Parser.describe(tokens, columns)
+        {string, decoder, encoder, acc} = config.adapter.static(tokens, context, t, types, params, id, max_rows)
         inspect = __inspect__(tokens, context, stack)
-        portal = "p_#{:erlang.unique_integer([:positive])}"
-        sql = %{sql | name: "sql_#{id}", params: [], columns: columns, c_len: c_len, types: types, tokens: tokens, string: string, inspect: inspect, id: id, portal: portal, p_len: byte_size(portal)}
+        sql = %{sql | params: [], columns: c, decoder: decoder, types: t, tokens: tokens, string: string, inspect: inspect, id: id}
+        count = length(t)
         case context.binding do
-          0 -> Macro.escape(sql)
+          0 -> Macro.escape(%{sql | msg: config.adapter.dynamic(types, params, count, acc)})
           _ ->
-            quote bind_quoted: [params: params, sql: Macro.escape(sql), env: Macro.escape(env)] do
-              portal = "p_#{:erlang.unique_integer([:positive])}"
-              %{sql | params: eval(params, binding(), env, sql.params), portal: portal, p_len: byte_size(portal)}
+            quote do
+              params = unquote(encoder)
+              %{unquote(Macro.escape(sql)) | params: params, msg: unquote(config.adapter).dynamic(unquote(types), params, unquote(count), unquote(acc))}
             end
         end
 
-      {:dynamic, data} ->
-        id = id(data)
-        sql = %{sql | id: id, name: "sql_#{id}"}
-        quote bind_quoted: [columns: Macro.escape(columns), left: Macro.unpipe(left), right: right, file: env.file, data: data, sql: Macro.escape(sql), env: Macro.escape(env), config: Macro.escape(%{config| validate: nil}), stack: Macro.escape(stack)] do
-          {t,p} = Enum.reduce(left, {[], []}, fn
-            {[], 0}, acc   -> acc
-            {v, 0}, {t, p} -> {t++v.tokens, p++v.params}
-            end)
-          {:ok, context, tokens} = tokens(right, file, sql.id)
+      {:dynamic, data, max_rows} ->
+        id = id(data, config.adapter)
+        sql = %{sql | id: id}
+        quote  do
+          {t,p} = collect(unquote(Macro.unpipe(left)))
+          {:ok, context, tokens} = tokens(unquote(right), unquote(env.file), unquote(id))
           tokens = t++tokens
-          context = %{context|validate: config.validate, module: config.adapter, format: :dynamic}
-          {string, inspect, columns, c_len, types, params} = plan(tokens, context, sql.id, stack, columns)
-          portal = "p_#{:erlang.unique_integer([:positive])}"
-          %{sql | tokens: tokens, params: eval(params, binding(), env, p), types: types, columns: columns, c_len: c_len, portal: portal, p_len: byte_size(portal), string: string, inspect: inspect}
+          {{string, decoder, encoder, acc}, t, c, types, inspect, params} = plan(tokens, %{context | validate: nil, module: unquote(config.adapter), format: :dynamic}, unquote(id), unquote(Macro.escape(stack)), unquote(Macro.escape(columns)), unquote(max_rows))
+          {params, _, _} = Code.eval_quoted_with_env(encoder, binding(), unquote(Macro.escape(Code.env_for_eval(env))))
+          params = params ++ p
+          %{unquote(Macro.escape(sql)) | params: params, columns: c, msg: unquote(config.adapter).dynamic(types, params, length(t), acc), types: t, decoder: decoder, tokens: tokens, string: string, inspect: inspect}
         end
     end
   end
 
   @doc false
-  def eval([], _binding, _env, acc), do: acc
-  def eval([value|rest], binding, env, acc) do
-    eval(rest, binding, env, [eval(value, binding, env)|acc])
-  end
+  def collect(value), do: collect(value, [], [])
 
-  defp eval(value, binding, env) do
-    case is_tuple(value) do
-      true ->
-        {v, _, _} = Code.eval_quoted_with_env(value, binding, env)
-        v
-      false -> value
-    end
-  end
+  defp collect([], tokens, params), do: {tokens, params}
+  defp collect([{[], 0}|rest], tokens, params), do: collect(rest, tokens, params)
+  defp collect([{%{tokens: t, params: p}, 0}|rest], tokens, params), do: collect(rest, tokens++t, params++p)
 
   @doc false
   def build(left, {tag, _, _} = right, _env) when tag in ~w[fn &]a do
-    {_type, data, acc2} = left
+    {_type, data, acc2, max_rows} = left
     |> Macro.unpipe()
-    |> Enum.reduce({:static, [], []}, fn
+    |> Enum.reduce({:static, [], [], 0}, fn
         {[], 0}, acc -> acc
-        {{_, _, []} = r, 0}, {_, l, right} -> {:dynamic, Macro.pipe(l, r, 0), right}
-        {{:sigil_SQL, _meta, [{:<<>>, _, _}, []]} = r, 0}, {type, l, right} -> {type, Macro.pipe(l, r, 0), right}
-        {{{:.,_,[{_,_,[:SQL]},:map]},_,[left]}, 0}, {type, acc, acc2} -> {type, acc, [left|acc2]}
+        {{_, _, []} = r, 0}, {_, l, right, max_rows} -> {:dynamic, Macro.pipe(l, r, 0), right, max_rows}
+        {{:sigil_SQL, _meta, [{:<<>>, _, _}, []]} = r, 0}, {type, l, right, max_rows} -> {type, Macro.pipe(l, r, 0), right, max_rows}
+        {{{:.,_,[{_,_,[:SQL]},:map]},_,[left]}, 0}, {type, acc, acc2, max_rows} -> {type, acc, [left|acc2], max_rows}
     end)
     [r | rest] = Enum.reverse([right|acc2])
     right = Enum.reduce(rest, r, fn r, {t, m, [{t2, m2, [vars, block]}]} -> {t, m, [{t2, m2, [vars, quote(do: unquote(r).(unquote(block)))]}]} end)
-    quote bind_quoted: [left: data, right: right] do
-      %{left | fn: right}
+    quote do
+      %{unquote(data) | fn: unquote(right), max_rows: unquote(max_rows)}
     end
   end
 
@@ -301,23 +308,24 @@ defmodule SQL do
   def build(left, {:<<>>, _, right}) do
     left
     |> Macro.unpipe()
-    |> Enum.reduce({:static, right}, fn
+    |> Enum.reduce({:static, right, 0}, fn
         {[], 0}, acc -> acc
-        {{:sigil_SQL, _meta, [{:<<>>, _, value}, []]}, 0}, {type, acc} -> {type, [value, ?\s, acc]}
-        {{_, _, _} = var, 0}, {_, acc} -> {:dynamic, [var, ?\s, acc]}
+        {{:sigil_SQL, _meta, [{:<<>>, _, value}, []]}, 0}, {type, acc, max_rows} -> {type, [value, ?\s, acc], max_rows}
+        {{_, _, _} = var, 0}, {_, acc, max_rows} -> {:dynamic, [var, ?\s, acc], max_rows}
     end)
     |> case do
-      {:static, data}  -> {:static, IO.iodata_to_binary(data)}
-      {:dynamic, data} -> {:dynamic, data}
+      {:static, data, max_rows}  -> {:static, IO.iodata_to_binary(data), max_rows}
+      {:dynamic, data, max_rows} -> {:dynamic, data, max_rows}
     end
   end
 
   @doc false
-  def id(data) do
-    case :persistent_term.get(data, nil) do
+  def id(data, mod) do
+    key = {mod, data}
+    case :persistent_term.get(key, nil) do
       nil ->
-        id = :erlang.phash2(data)
-        :persistent_term.put(data, id)
+        id = :erlang.phash2(key)
+        :persistent_term.put(key, id)
         id
       id -> id
     end
@@ -338,16 +346,13 @@ defmodule SQL do
   end
 
   @doc false
-  def plan(tokens, context, id, stack, columns) do
-    __plan__(tokens, context, {context.module, id, :plan}, stack, columns)
-  end
-
-  defp __plan__(tokens, context, key, stack, columns) do
+  def plan(tokens, context, id, stack, columns, max_rows) do
+    key = {context.module, id, :plan}
     case :persistent_term.get(key, nil) do
       nil ->
         {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
-        {:ok, columns, c_len, types, params} = SQL.Parser.describe(tokens, columns)
-        format = {IO.iodata_to_binary(context.module.to_iodata(tokens, context)), __inspect__(tokens, context, stack), columns, c_len, types, params}
+        {:ok, t, c, types, params} = SQL.Parser.describe(tokens, columns)
+        format = {context.module.static(tokens, context, t, types, params, id, max_rows), t, c, types, __inspect__(tokens, context, stack), params}
         :persistent_term.put(key, format)
         format
 
@@ -372,61 +377,48 @@ defmodule SQL do
   end
 
   @doc false
-  def format_error(errors), do: Enum.group_by(errors, &elem(&1, 2)) |> Enum.reduce([], fn
-    {k, [{:special, _, _}]}, acc -> [acc|["  the operator", @error,k,@reset, " is invalid, did you mean any of #{__suggest__(k)}\n"]]
-    {k, [{:special, _, _}|_]=v}, acc -> [acc|["  the operator ",@error,k,@reset," is mentioned #{length(v)} times but is invalid, did you mean any of #{__suggest__(k)}\n"]]
-    {k, [_]}, acc -> [acc|["  the relation ",@error,k,@reset," does not exist\n"]]
-    {k, v}, acc -> [acc|["  the relation ",@error,k,@reset," is mentioned #{length(v)} times but does not exist\n"]]
-  end)
+  def format_error(errors) do
+    errors
+    |> Enum.group_by(&elem(&1, 2))
+    |> Enum.reduce([], fn
+      {k, [{:special, _, _}]}, acc -> [acc|["  the operator", @error,k,@reset, " is invalid, did you mean any of #{__suggest__(k)}\n"]]
+      {k, [{:special, _, _}|_]=v}, acc -> [acc|["  the operator ",@error,k,@reset," is mentioned #{length(v)} times but is invalid, did you mean any of #{__suggest__(k)}\n"]]
+      {k, [_]}, acc -> [acc|["  the relation ",@error,k,@reset," does not exist\n"]]
+      {k, v}, acc -> [acc|["  the relation ",@error,k,@reset," is mentioned #{length(v)} times but does not exist\n"]]
+    end)
+  end
 
   @doc false
-  def reduce(%SQL{fn: nil} = sql, acc, fun) do
-    reduce(%{sql | fn: fn row, acc -> fun.(row, acc) end, acc: acc})
+  def reduce(%SQL{msg: {_string, nil, nil}}, _acc, _fun) do
+    raise RuntimeError, "Invalid Something"
   end
   def reduce(sql, acc, fun) do
-    reduce(%{sql | fn: fn row, acc -> fun.(sql.fn.(row), acc) end, acc: acc})
+    do_reduce(sql, acc, fun)
   end
-  defp reduce(sql) do
-    ref = make_ref()
-    self = self()
-    timestamp = System.monotonic_time()
-    entry = {ref, self, timestamp, sql}
+  defp do_reduce(sql, acc, fun) do
+    {metrics, sockets, state, queue, prepared} = :persistent_term.get(sql.pool)
     case transaction() do
       nil ->
-        conn = pick(sql.pool)
-        send(conn, entry)
-        result = recv(conn, ref, sql.timeout || 15_000)
-        # Logger.debug(sql: sql, time: System.convert_time_unit(System.monotonic_time()-timestamp, :native, :millisecond))
-        result
-      {owner, conn} ->
-        send(conn, {owner, entry})
-        result = recv(conn, ref, sql.timeout || 15_000)
-        # Logger.debug(sql: sql, time: System.convert_time_unit(System.monotonic_time()-timestamp, :native, :millisecond))
-        result
+        case SQL.Pool.checkout(metrics, queue, state, sql.queue_timeout) do
+          {:error, :timeout} -> raise RuntimeError, "timeout"
+          {slot, monitor} ->
+            [{^slot, socket, conn}] = :ets.lookup(sockets, slot)
+            {:ok, rows, _time} = sql.adapter.prepare_execute(socket, conn, sql, prepared)
+            result = Enumerable.reduce(rows, acc, fun)
+            send monitor, :release
+            SQL.Pool.dequeue(metrics, queue, state, slot)
+            result
+        end
+        # Logger.debug(sql: sql, time: System.convert_time_unit(:erlang.monotonic_time(:millisecond)-timestamp, :native, :millisecond))
+      {_owner, socket, conn} ->
+        {:ok, rows, _time} = sql.adapter.prepare_execute(socket, conn, sql, prepared)
+        Enumerable.reduce(rows, acc, fun)
+        # Logger.debug(sql: sql, time: System.convert_time_unit(:erlang.monotonic_time(:millisecond)-timestamp, :native, :millisecond))
     end
   end
-
-  defp recv(conn, ref, timeout) do
-    receive do
-      {^ref, {:supended, _}=msg} -> msg
-      {^ref, {:halted, _}=msg} -> msg
-      {^ref, {:cont, _}} -> recv(conn, ref, timeout)
-      {^ref, {:done, _}=msg} -> msg
-      {^ref, {:error, %{message: message}}} ->
-        raise RuntimeError, message
-    after
-      timeout ->
-        send(conn, {ref, :cancel})
-        recv(conn, ref, timeout)
-    end
-  end
-
-  @doc false
-  def conn(%SQL{pool: pool}), do: pick(pool)
-  def conn(pool), do: pick(pool)
 
   if Application.compile_env(:sql, :env) == :test do
-    defp __conn__() do
+    def conn() do
       {:links, links} = Process.info(self(), :links)
       {:parent, parent} = Process.info(self(), :parent)
       [parent|links]
@@ -435,36 +427,14 @@ defmodule SQL do
       |> Enum.uniq()
       |> Enum.find_value(&:persistent_term.get({SQL.Conn, &1}, nil))
     end
-    defp conn() do
-      case Process.get(SQL.Conn) || __conn__() do
-        {_, conn} -> conn
-        conn -> conn
-      end
-    end
     @doc false
     def transaction() do
-      Process.get(SQL.Transaction) || __conn__()
+      Process.get(SQL.Transaction) || conn()
     end
   else
-    defp conn() do
-      Process.get(SQL.Conn)
-    end
     @doc false
     def transaction() do
       Process.get(SQL.Transaction)
-    end
-  end
-
-
-  defp pick(pool) do
-    case conn() do
-      nil ->
-        conns = :persistent_term.get(pool)
-        conn = elem(conns, :erlang.phash2({self(), :rand.uniform(1_000_000)}, tuple_size(conns)-1))
-        Process.put(SQL.Conn, conn)
-        conn
-      conn ->
-        conn
     end
   end
 

@@ -24,7 +24,7 @@ if Code.ensure_loaded?(:yamerl) do
     # SPDX-FileCopyrightText: 2025 DBVisor
     defmodule SQL.Conformance.<%= @mod %>Test do
       use ExUnit.Case, async: true
-      use SQL, case: :upper
+      use SQL, case: :upper, adapter: SQL.Adapters.ANSI
       <%= for {name, statements} <- generate_test(@dir) do %>
       test <%= inspect name %> do
       <%= for statement <- statements do %>  assert ~s{<%= statement %>} == to_string(~SQL[<%= statement %>])

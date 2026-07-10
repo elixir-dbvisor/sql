@@ -108,16 +108,16 @@ defmodule SQL.Lexer do
       <<?|, rest::binary>> -> special(rest, [?|], context, line, column, 1, ol, oc, acc)
       <<?~, rest::binary>> -> special(rest, [?~], context, line, column, 1, ol, oc, acc)
       <<?_, rest::binary>> -> ident(rest, [?_], context, line, column, 1, ol, oc, acc)
-      <<?0, rest::binary>> -> num(rest, [?0], context, line, column, 1, ol, oc, acc)
-      <<?1, rest::binary>> -> num(rest, [?1], context, line, column, 1, ol, oc, acc)
-      <<?2, rest::binary>> -> num(rest, [?2], context, line, column, 1, ol, oc, acc)
-      <<?3, rest::binary>> -> num(rest, [?3], context, line, column, 1, ol, oc, acc)
-      <<?4, rest::binary>> -> num(rest, [?4], context, line, column, 1, ol, oc, acc)
-      <<?5, rest::binary>> -> num(rest, [?5], context, line, column, 1, ol, oc, acc)
-      <<?6, rest::binary>> -> num(rest, [?6], context, line, column, 1, ol, oc, acc)
-      <<?7, rest::binary>> -> num(rest, [?7], context, line, column, 1, ol, oc, acc)
-      <<?8, rest::binary>> -> num(rest, [?8], context, line, column, 1, ol, oc, acc)
-      <<?9, rest::binary>> -> num(rest, [?9], context, line, column, 1, ol, oc, acc)
+      <<?0, rest::binary>> -> int(rest, [?0], context, line, column, 1, ol, oc, acc)
+      <<?1, rest::binary>> -> int(rest, [?1], context, line, column, 1, ol, oc, acc)
+      <<?2, rest::binary>> -> int(rest, [?2], context, line, column, 1, ol, oc, acc)
+      <<?3, rest::binary>> -> int(rest, [?3], context, line, column, 1, ol, oc, acc)
+      <<?4, rest::binary>> -> int(rest, [?4], context, line, column, 1, ol, oc, acc)
+      <<?5, rest::binary>> -> int(rest, [?5], context, line, column, 1, ol, oc, acc)
+      <<?6, rest::binary>> -> int(rest, [?6], context, line, column, 1, ol, oc, acc)
+      <<?7, rest::binary>> -> int(rest, [?7], context, line, column, 1, ol, oc, acc)
+      <<?8, rest::binary>> -> int(rest, [?8], context, line, column, 1, ol, oc, acc)
+      <<?9, rest::binary>> -> int(rest, [?9], context, line, column, 1, ol, oc, acc)
       <<?A, rest::binary>> -> ident(rest, [?a], context, line, column, 1, ol, oc, acc)
       <<?B, rest::binary>> -> ident(rest, [?b], context, line, column, 1, ol, oc, acc)
       <<?C, rest::binary>> -> ident(rest, [?c], context, line, column, 1, ol, oc, acc)
@@ -448,6 +448,48 @@ defmodule SQL.Lexer do
         case data do
           unquote(case_ast)
         end
+    end
+  end
+
+  defp int(rest, data, context, line, column, length, ol, oc, acc) do
+    case rest do
+      <<226, 129, 166, _::binary>> -> {:error, :bidi, line, column}
+      <<226, 129, 167, _::binary>> -> {:error, :bidi, line, column}
+      <<226, 129, 168, _::binary>> -> {:error, :bidi, line, column}
+      <<226, 129, 169, _::binary>> -> {:error, :bidi, line, column}
+      <<226, 128, 170, _::binary>> -> {:error, :bidi, line, column}
+      <<226, 128, 171, _::binary>> -> {:error, :bidi, line, column}
+      <<226, 128, 172, _::binary>> -> {:error, :bidi, line, column}
+      <<226, 128, 173, _::binary>> -> {:error, :bidi, line, column}
+      <<226, 128, 174, _::binary>> -> {:error, :bidi, line, column}
+      <<239, 187, 191, _::binary>> -> {:error, :zero_width, line, column}
+      <<226, 128, 141, _::binary>> -> {:error, :zero_width, line, column}
+      <<226, 128, 140, _::binary>> -> {:error, :zero_width, line, column}
+      <<226, 128, 139, _::binary>> -> {:error, :zero_width, line, column}
+      <<226, 129, 160, _::binary>> -> {:error, :zero_width, line, column}
+      <<225, 158, 181, _::binary>> -> {:error, :zero_width, line, column}
+      <<225, 158, 180, _::binary>> -> {:error, :zero_width, line, column}
+      <<225, 160, 142, _::binary>> -> {:error, :zero_width, line, column}
+      <<205, 143, _::binary>> -> {:error, :cgj, line, column}
+      <<?_, rest::binary>> -> int(rest, [?_|data], context, line, column, length+1, ol, oc, acc)
+      <<?., rest::binary>> -> num(rest, [?.|data], context, line, column, length+1, ol, oc, acc)
+      <<?-, rest::binary>> -> num(rest, [?-|data], context, line, column, length+1, ol, oc, acc)
+      <<?+, rest::binary>> -> num(rest, [?+|data], context, line, column, length+1, ol, oc, acc)
+      <<?e, rest::binary>> -> num(rest, [?e|data], context, line, column, length+1, ol, oc, acc)
+      <<?E, rest::binary>> -> num(rest, [?E|data], context, line, column, length+1, ol, oc, acc)
+      <<?0, rest::binary>> -> int(rest, [?0|data], context, line, column, length+1, ol, oc, acc)
+      <<?1, rest::binary>> -> int(rest, [?1|data], context, line, column, length+1, ol, oc, acc)
+      <<?2, rest::binary>> -> int(rest, [?2|data], context, line, column, length+1, ol, oc, acc)
+      <<?3, rest::binary>> -> int(rest, [?3|data], context, line, column, length+1, ol, oc, acc)
+      <<?4, rest::binary>> -> int(rest, [?4|data], context, line, column, length+1, ol, oc, acc)
+      <<?5, rest::binary>> -> int(rest, [?5|data], context, line, column, length+1, ol, oc, acc)
+      <<?6, rest::binary>> -> int(rest, [?6|data], context, line, column, length+1, ol, oc, acc)
+      <<?7, rest::binary>> -> int(rest, [?7|data], context, line, column, length+1, ol, oc, acc)
+      <<?8, rest::binary>> -> int(rest, [?8|data], context, line, column, length+1, ol, oc, acc)
+      <<?9, rest::binary>> -> int(rest, [?9|data], context, line, column, length+1, ol, oc, acc)
+      rest ->
+        end_column = column+length
+        lex(rest, context, line, end_column, line, end_column, node(:integer, :literal, line, column, line, end_column, ol, oc, context, :lists.reverse(data), acc))
     end
   end
 

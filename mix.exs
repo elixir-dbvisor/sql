@@ -4,7 +4,7 @@
 defmodule SQL.MixProject do
   use Mix.Project
 
-  @version "0.5.0"
+  @version "0.6.0-dev"
 
   def project do
     [
@@ -18,10 +18,8 @@ defmodule SQL.MixProject do
       docs: docs(),
       package: package(),
       elixirc_paths: elixirc_paths(Mix.env()),
-      aliases: [
-        "sql.bench": "run benchmarks/bench.exs",
-        test: ["sql.create --quiet", "test"]
-      ]
+      # compilers: [:sql] ++ Mix.compilers(),
+      aliases: [test: ["sql.create --quiet", "test"]]
     ]
   end
 
@@ -54,12 +52,9 @@ defmodule SQL.MixProject do
 
   defp deps do
     [
-      {:benchee, "~> 1.5", only: :dev},
-      {:ecto_sql, "~> 3.13", only: :dev},
-      {:postgrex, ">= 0.0.0", only: :dev},
-      {:ex_doc, "~> 0.37", only: :dev},
+      {:ex_doc, "~> 0.40.3", only: :dev},
       {:yamerl, ">= 0.0.0", only: [:dev, :test]},
-      {:unicode_set, "~> 1.0"}
+      {:unicode_set, "~> 1.7"}
     ]
   end
 end

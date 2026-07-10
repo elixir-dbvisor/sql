@@ -16,9 +16,11 @@ defmodule Mix.Tasks.Compile.Sql do
   def run(_args) do
     Mix.Task.Compiler.after_compiler(:elixir, fn
       {:noop, diagnostics} ->
+        decoders()
         {:noop, diagnostics}
       {status, diagnostics} ->
         compile()
+        decoders()
         {status, diagnostics}
     end)
   end
@@ -41,5 +43,23 @@ defmodule Mix.Tasks.Compile.Sql do
 
   def files(path \\ File.cwd!) do
     for file <- File.ls!(path), do: Path.join(path, file)
+  end
+
+  def decoders() do
+    :dets.open_file(:sql, [type: :set, ram_file: true])
+    :dets.traverse(:sql, fn record ->
+      case record do
+        {module, t, mod, loc} ->
+          path = Path.join(Mix.Project.compile_path(), "#{module}.beam")
+          case Code.ensure_compiled(module) do
+            {:module, _} -> :continue
+            {:error, _} ->
+              {:module, ^module, binary, _term} = Module.create(module, mod.build_decoder(t), loc)
+              File.write!(path, binary)
+          end
+        _ -> :continue
+      end
+    end)
+    :ok
   end
 end

@@ -9,8 +9,8 @@ defmodule SQLTest do
      sql |> ~SQL[from users u]
   end
 
-  def where(sql, var \\ "john@example.com") do
-    sql |> ~SQL[where u.email::text = {{var}}]
+  def where(sql) do
+    sql |> ~SQL[where u.email::text = 'john@example.com']
   end
 
   describe "composable" do
@@ -27,8 +27,7 @@ defmodule SQLTest do
       |> ~SQL[select id, email, inserted_at, updated_at]
       |> where()
 
-      assert ["john@example.com"] = sql.params
-      assert " select id, email, inserted_at, updated_at from users u where u.email::text = ?" == to_string(sql)
+      assert " select id, email, inserted_at, updated_at from users u where u.email::text = 'john@example.com'" == to_string(sql)
     end
   end
 
@@ -59,19 +58,17 @@ defmodule SQLTest do
   end
 
   test "to_sql/1" do
-    email = "john@example.com"
-    assert {" select id, email\nfrom users\nwhere email = ?", ["john@example.com"]} == to_sql(~SQL"""
+    assert {" select id, email\nfrom users\nwhere email = 'john@example.com'", []} == to_sql(~SQL"""
     select id, email
-    where email = {{email}}
+    where email = 'john@example.com'
     from users
     """)
   end
 
   test "can parse multiple queries" do
-    email = "john@example.com"
-    assert {" select id, email\nfrom users\nwhere email = ?;\nselect id from users", [email]} == to_sql(~SQL"""
+    assert {" select id, email\nfrom users\nwhere email = 'john@example.com';\nselect id from users", []} == to_sql(~SQL"""
     select id, email
-    where email = {{email}}
+    where email = 'john@example.com'
     from users;
     select id from users
     """)
@@ -393,54 +390,6 @@ defmodule SQLTest do
       assert "select \"db.users.id\"" == to_string(~SQL[select "db.users.id"])
       assert "select 'db.users'" == to_string(~SQL[select 'db.users'])
       assert "select \"db.users.id\", 'db.users'" == to_string(~SQL[select "db.users.id", 'db.users'])
-    end
-  end
-
-  describe "interpolation" do
-    test "binding" do
-      var1 = 1
-      var0 = "id"
-      var2 = ~SQL[select {{var0}}]
-      assert ["id"] == var2.params
-      sql = ~SQL[select {{var2}}, {{var1}}]
-      assert [var2, 1] == sql.params
-      assert "select ?, ?" == to_string(sql)
-    end
-
-    test ". syntax" do
-      map = %{k: "v"}
-      sql = ~SQL[select {{map.k <> "v"}}]
-      assert ["vv"] == sql.params
-      assert "select ?" == to_string(sql)
-    end
-
-    test "code" do
-      sql = ~SQL[select {{0}}, {{%{k: 1}}}]
-      assert [0, %{k: 1}] == sql.params
-      assert "select ?, ?" == to_string(sql)
-    end
-
-    test "in" do
-      sql = ~SQL"select {{1}} in {{[1, 2]}}"
-      assert [1, [1, 2]] == sql.params
-      assert "select ? in ?" == to_string(sql)
-
-      sql = ~SQL"select {{1}} not in {{[1, 2]}}"
-      assert [1, [1, 2]] == sql.params
-      assert "select ? not in ?" == to_string(sql)
-    end
-
-    test "mixin" do
-      for email <- ["1@example.com", "2@example.com", "3@example.com"] do
-        sql = from() |> ~SQL[select id, email, inserted_at, updated_at] |> where(email)
-        assert {" select id, email, inserted_at, updated_at from users u where u.email::text = ?", [email]} == SQL.to_sql(sql)
-      end
-    end
-
-    test "preserve order" do
-      name = "alice"
-      min_age = 18
-      assert {" select id, ? as threshold from users where name = ?", [min_age, name]} == SQL.to_sql(~SQL[WHERE name = {{name}} SELECT id, {{min_age}} AS threshold FROM users])
     end
   end
 

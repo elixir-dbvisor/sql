@@ -201,7 +201,7 @@ defmodule SQL.Parser do
     parse(tokens, context, [node|unit], acc, root, acc2, errors)
   end
 
-  @literal ~w[numeric ident double_quote quote bracket dot binding paren some ::]a
+  @literal ~w[numeric integer ident double_quote quote bracket dot binding paren some ::]a
   @comparison ~w[= != <> < > <= >= in is like ilike between notnull isnull and or]a
   defp __parse__(tokens) do
     case tokens do
@@ -296,6 +296,8 @@ defmodule SQL.Parser do
 
       [{tl, _, _}=l, {t=:notnull, m, []=a}|rest] when tl in @literal -> __parse__([{t, m, [l|a]}|rest])
       [{tl, _, _}=l, {t=:isnull, m, []=a}|rest] when tl in @literal -> __parse__([{t, m, [l|a]}|rest])
+      [{tl, _, _}=l, {t=:in, m, []=a}, {_, _, _}=ll, {tt=:"::", mm, []=aa}, {_, _, _}=rr, {bt=:bracket, bm, ba=[]}|rest] when tl in @literal -> __parse__([{t, m, [l,{tt, mm, [ll,{bt, bm, [rr|ba]}|aa]}|a]}|rest])
+      [{tl, _, _}=l, {t=:in, m, []=a}, {_, _, _}=ll, {tt=:"::", mm, []=aa}, {_, _, _}=rr|rest] when tl in @literal -> __parse__([{t, m, [l,{tt, mm, [ll,rr|aa]}|a]}|rest])
       [{tl, _, _}=l, {t=:in, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [l,r|a]}|rest])
       [{tl, _, _}=l, {t=:like, m, []=a}, {ll, _, _}=lll, {et=:escape, em, []=ea}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [l,{et, em, [lll, r|ea]}|a]}|rest])
       [{tl, _, _}=l, {t=:ilike, m, []=a}, {ll, _, _}=lll, {et=:escape, em, []=ea}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [l,{et, em, [lll, r|ea]}|a]}|rest])
@@ -305,6 +307,10 @@ defmodule SQL.Parser do
 
       [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:like, m, []=a}, {ll, _, _}=lll, {et=:escape, em, []=ea}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},{et, em, [lll, r|ea]}|a]}|rest])
       [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:ilike, m, []=a}, {ll, _, _}=lll, {et=:escape, em, []=ea}, {tr, _, _}=r|rest] when tl in @literal and ll in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},{et, em, [lll, r|ea]}|a]}|rest])
+
+      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:in, m, []=a}, {_, _, _}=ll, {tt=:"::", mm, []=aa}, {_, _, _}=rr, {bt=:bracket, bm, ba=[]}|rest] when tl in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},{tt, mm, [ll,{bt, bm, [rr|ba]}|aa]}|a]}|rest])
+      [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:in, m, []=a}, {_, _, _}=ll, {tt=:"::", mm, []=aa}, {_, _, _}=rr|rest] when tl in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},{tt, mm, [ll,rr|aa]}|a]}|rest])
+
       [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:in, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest])
       [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:like, m, []=a}, {tr, _, _}=r|rest] when  tl in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest])
       [{tl, _, _}=l, {nt=:not, nm, []=na}, {t=:ilike, m, []=a}, {tr, _, _}=r|rest] when tl in @literal and tr in @literal -> __parse__([{t, m, [{nt, nm, [l|na]},r|a]}|rest])
@@ -334,7 +340,10 @@ defmodule SQL.Parser do
 
       [{t=:array, m, []=a}, {:bracket, _, _}=r|rest] -> __parse__([{t, m, [r|a]}|rest])
 
-      [{_,[_,{_, :literal}|_],_}=l,{_,[_,{_, :literal}|_],_}=r|rest] -> __parse__([{:as, [], [l,r]}|rest])
+      [{:ident, _, _}=l, {t2, m2, a2}, {:uescape=t, m, a}, {:quote, _, _}=r|rest] when t2 in ~w[double_quote quote]a -> __parse__([{t, m, [{t2, m2, [l, {:ident, [], a2}]},r|a]}|rest])
+
+
+      [{_,[_,{_, :literal}|_],_}=l,{tag,[_,{_, :literal}|_],_}=r|rest] when tag != :double_quote -> __parse__([{:as, [], [l,r]}|rest])
       [{:dot, _, _}=l, {:ident, _, _}=r|rest] ->  __parse__([{:as, [], [l,r]}|rest])
       [{:ident, _, _}=l, {:ident, _, _}=r|rest] -> __parse__([{:as, [], [l,r]}|rest])
 
@@ -371,7 +380,7 @@ defmodule SQL.Parser do
       values -> values++errors
     end
   end
-  defp validate({tag, _, [{t, _, _}]}, _, errors) when tag in ~w[offset limit]a and t in ~w[numeric binary hexadecimal octal]a, do: errors
+  defp validate({tag, _, [{t, _, _}]}, _, errors) when tag in ~w[offset limit]a and t in ~w[numeric integer binary hexadecimal octal]a, do: errors
   defp validate({tag, _, _} = node, _, errors) when tag in ~w[offset limit]a, do: [node|errors]
 
   defp validate_table(fun, {_, _, value}=node, acc)  do
@@ -416,13 +425,20 @@ defmodule SQL.Parser do
   end
   defp description([], columns, []=aliases, [], bindings) do
     {types, params} = resolve_binding(Enum.reverse(bindings), aliases, columns, [], [])
-    {:ok, [], 0, Enum.reverse(types), Enum.reverse(params)}
+    {:ok, [], [], Enum.reverse(types), Enum.reverse(params)}
   end
   defp description([], columns, froms, select, bindings) do
     aliases = resolve_aliases(froms, columns, [])
-    description = resolve_description(select, aliases, columns, [])
+    {t, c} = Enum.reduce(resolve_description(select, aliases, columns, []), {[], []}, fn
+      nil, {tt, cc} -> {tt, cc}
+      {nil, c}, {tt, cc} -> {tt, [c|cc]}
+      {t, nil}, {tt, cc} -> {[t|tt], cc}
+      {t, c}, {tt, cc} -> {[t|tt], [c|cc]}
+      c, {tt, cc} -> {tt, [c|cc]}
+    end)
+    {t, c} = if length(t) == length(c), do: {Enum.reverse(t), Enum.reverse(c)}, else: {Enum.reverse(t), []}
     {types, params} = resolve_binding(Enum.reverse(bindings), aliases, columns, [], [])
-    {:ok, description, length(description), Enum.reverse(types), params}
+    {:ok, t, c, Enum.reverse(types), params}
   end
 
   defp resolve_description([], _aliases, _columns, []=acc), do: acc
@@ -477,23 +493,51 @@ defmodule SQL.Parser do
     |> Enum.map(fn col -> {:"#{col.udt_name}", :"#{col.column_name}"} end)
   end
 
+  defp types(_schema, _table, []=columns), do: columns
+  defp types(schema, table, columns) do
+    schema = "#{schema}"
+    table = "#{table}"
+    columns
+    |> Enum.filter(&(&1.table_schema == schema and &1.table_name == table))
+    |> Enum.sort_by(& &1.ordinal_position)
+    |> Enum.map(fn col -> :"#{col.udt_name}" end)
+  end
+
   defp resolve_aliases([{tag, _, value}|rest], columns, aliases) when tag in ~w[insert from update delete inner outer left right full natural cross join]a do
-    resolve_aliases(rest, columns, [{tag, resolve_aliases(value, columns, [])}|aliases])
+    case resolve_aliases(value, columns, []) do
+      [] -> resolve_aliases(rest, columns, aliases)
+      alias -> resolve_aliases(rest, columns, [{tag, alias}|aliases])
+    end
   end
   defp resolve_aliases([{:into, _, [{:ident,_,table}|_]}|rest], columns, aliases) do
-    resolve_aliases(rest, columns, [{:"#{table}", columns(table, columns)}|aliases])
+    case columns(table, columns) do
+      [] -> resolve_aliases(rest, columns, aliases)
+      c -> resolve_aliases(rest, columns, [{:"#{table}", c}|aliases])
+    end
   end
   defp resolve_aliases([{:as, _, [{:ident,_,table},{:ident,_,as}]}|rest], columns, aliases) do
-    resolve_aliases(rest, columns, [{:"#{table}", :"#{as}", columns(table, columns)}|aliases])
+    case columns(table, columns) do
+      [] -> resolve_aliases(rest, columns, aliases)
+      c -> resolve_aliases(rest, columns, [{:"#{table}", :"#{as}", c}|aliases])
+    end
   end
   defp resolve_aliases([{:as, _, [{:dot,_,[{:ident,_,schema},{:ident,_,table}]},{:ident,_,as}]}|rest], columns, aliases) do
-    resolve_aliases(rest, columns, [{:"#{schema}", :"#{table}", :"#{as}", columns(schema, table, columns)}|aliases])
+    case columns(schema, table, columns) do
+      [] -> resolve_aliases(rest, columns, aliases)
+      c -> resolve_aliases(rest, columns, [{:"#{schema}", :"#{table}", :"#{as}", c}|aliases])
+    end
   end
   defp resolve_aliases([{:ident,_,table}|rest], columns, aliases) do
-    resolve_aliases(rest, columns, [{:"#{table}", columns(table, columns)}|aliases])
+    case columns(table, columns) do
+      [] -> resolve_aliases(rest, columns, aliases)
+      c -> resolve_aliases(rest, columns, [{:"#{table}", c}|aliases])
+    end
   end
   defp resolve_aliases([{:dot,_,[{:ident,_,schema},{:ident,_,table}]}|rest], columns, aliases) do
-    resolve_aliases(rest, columns, [{:"#{schema}", :"#{table}", columns(schema, table, columns)}|aliases])
+    case columns(schema, table, columns) do
+      [] -> resolve_aliases(rest, columns, aliases)
+      c -> resolve_aliases(rest, columns, [{:"#{schema}", :"#{table}", c}|aliases])
+    end
   end
   defp resolve_aliases([{:paren,_, _value}, {:ident,_,as}|rest], columns, aliases) do
     resolve_aliases(rest, columns, [{:"#{as}", []}|aliases])
@@ -575,6 +619,8 @@ defmodule SQL.Parser do
 
   defp type({:paren, _, [{:select, _, _}|_]}, aliases), do: {:record, aliases}
   defp type({:over, _, [{:rank, _, _}, _]}, _aliases), do: :numeric
+  defp type({:repeat, _, [{:paren, _, [type, _]}]}, aliases), do: type(type, aliases)
+  defp type({:md5, _, [{:paren, _, [type]}]}, aliases), do: type(type, aliases)
   defp type({tag, _, [_, right]}, aliases) when tag in ~w[:: dot]a, do: type(right, aliases)
   defp type({:array_agg, _, [type|_]}, aliases) do
     case resolve_column(type, aliases, []) do
@@ -586,7 +632,7 @@ defmodule SQL.Parser do
   defp type({:quote, _, _}, _aliases), do: :text
   defp type({tag, _, _}, _aliases) when tag in ~w[true false]a, do: :bool
   defp type({tag, _, _}, _aliases) when tag in ~w[numeric avg - + *]a, do: :numeric
-  defp type({tag, _, _}, _aliases) when tag in ~w[null hstore]a, do: tag
+  defp type({tag, _, _}, _aliases) when tag in ~w[null hstore integer]a, do: tag
   defp type({:ident, _, ident}, aliases) do
     col = :"#{ident}"
     case resolve_type(aliases, col, []) do
@@ -610,18 +656,43 @@ defmodule SQL.Parser do
   defp column(_, _), do: nil
 
 
-  defp resolve_column({:as, _, [left, right]}, aliases, _columns), do: {type(left, aliases), column(right, aliases)}
-  defp resolve_column({:"::", _, [{:paren, _, _} = _left, {:dot, _, [{:ident, _, schema}, {:ident, _, table}]}]}, aliases, _columns), do: columns(schema, table, aliases)
-  defp resolve_column({:"::", _, [{t, _, _}, right]}, aliases, _columns) when t in ~w[binding paren numeric quote]a, do: {type(right, aliases), nil}
-  defp resolve_column({:"::", _, [left, right]}, aliases, _columns), do: {type(right, aliases), column(left, aliases)}
+  defp resolve_column({:as, _, [left, right]}, aliases, columns) do
+    case resolve_column(left, aliases, columns) do
+      {:array, {type, _}} -> {{:array, type}, column(right, aliases)}
+      {:record, []} -> column(right, aliases)
+      {{:record, _}=type, _} -> {type, column(right, aliases)}
+      {:record, _}=type -> {type, column(right, aliases)}
+      {type, _col} -> {type, column(right, aliases)}
+      _col -> column(right, aliases)
+    end
+  end
+  defp resolve_column({:"::", _, [{:paren, _, _} = _left, {:dot, _, [{:ident, _, schema}, {:ident, _, table}]}]}, _aliases, columns) do
+    {{:record, types(schema, table, columns)}, nil}
+  end
+  defp resolve_column({:"::", _, [{:row, _, [{:paren, _, values}]}, _right]}, aliases, columns), do: {:record, Enum.map(resolve_desc(values, aliases, columns, []), fn
+    {t, nil} -> t
+    t -> t
+  end)}
+  defp resolve_column({:"::", _, [{t, _, _}, right]}, aliases, _columns) when t in ~w[binding paren numeric integer quote]a, do: {type(right, aliases), nil}
+  defp resolve_column({:"::", _, [left, right]}, aliases, _columns) do
+    {type(right, aliases), column(left, aliases)}
+  end
   defp resolve_column({:dot, _, [{:dot, _, [{:ident, _, schema}, {:ident, _, table}]}, {:*, _, []}]}, aliases, _columns), do: columns(schema, table, aliases)
   defp resolve_column({:dot, _, [{:ident, _, table}, {:*, _, []}]}, aliases, _columns), do: columns(table, aliases)
-  defp resolve_column({:=, _, [left, right]}, aliases, _columns), do: {:bool, column(left, aliases) || column(right, aliases)}
+  defp resolve_column({tag, _, [left, right]}, aliases, _columns) when tag in ~w[= in]a, do: {:bool, column(left, aliases) || column(right, aliases)}
   defp resolve_column({:coalesce, _, [{:paren, _, [left, right]}]}, aliases, _columns), do: column(left, aliases) || column(right, aliases)
-  defp resolve_column({tag, _, [type|_]}, aliases, columns) when tag in ~w[array_agg bracket]a, do: {:array, resolve_column(type, aliases, columns)}
+  defp resolve_column({tag, _, [type|_]}, aliases, columns) when tag in ~w[array_agg bracket]a do
+    case resolve_column(type, aliases, columns) do
+      {t, nil} -> {:array, t}
+      t -> {:array, t}
+    end
+  end
   defp resolve_column({:array, _, [type]}, aliases, columns), do: resolve_column(type, aliases, columns)
+  defp resolve_column({:paren, _, [{:select, _, _}|_]}, [], _columns) do
+    {nil, nil}
+  end
   defp resolve_column({:paren, _, [{:select, _, _}|_] = values}, aliases, columns) do
-    {:record, resolve_desc(values, aliases, columns, [])}
+    {{:record, Enum.reject(resolve_desc(values, aliases, columns, []), &is_nil/1)}, nil}
   end
 
   defp resolve_column({:paren, _, [left|_]}, aliases, columns), do: resolve_column(left, aliases, columns)
@@ -629,14 +700,26 @@ defmodule SQL.Parser do
     {:record, [:void]}
   end
   defp resolve_column({:row, _, [{:paren, _, values}]}, aliases, columns) do
-    {:record, resolve_desc(values, aliases, columns, [])}
+    {{:record, Enum.map(resolve_desc(values, aliases, columns, []), fn
+      {t, nil} -> t
+      t -> t
+    end)}, nil}
   end
-  defp resolve_column(node, aliases, _columns) do
-    type = type(node, aliases)
-    column = column(node, aliases)
-    case type == column do
-      true -> {nil, column}
-      false -> {type, column}
+  defp resolve_column(node, []=aliases, _columns) do
+    case {type(node, aliases), __column__(node, aliases)} do
+      {col, col} -> {nil, col}
+      result -> result
     end
   end
+  defp resolve_column(node, aliases, _columns) do
+    {type(node, aliases), __column__(node, aliases)}
+  end
+
+
+  defp __column__({:ident, _, col}, _aliases), do: :"#{col}"
+  # defp __column__({col, _, []}, _aliases), do: col
+  defp __column__({:dot, _, [_, right]}, aliases), do: __column__(right, aliases)
+  defp __column__({:comma, _, [right]}, aliases), do: __column__(right, aliases)
+  defp __column__({_tag, _, [{:paren, _, [left, right]}]}, aliases), do: __column__(left, aliases) || __column__(right, aliases)
+  defp __column__(_, _), do: nil
 end

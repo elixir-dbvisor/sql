@@ -91,6 +91,24 @@ defmodule SQL.Format do
   defp to_iodata({:comments, _m, value}, _color, _case, _errors, _indent, acc) do
     [?\\,?*,value,?*,?\\|acc]
   end
+  defp to_iodata({:quote, m, [l, {:ident, [], value}]}=node, true=color, case, errors, indent, acc) do
+    case node in errors do
+      true -> to_iodata(l, color, case, errors, indent, indention([?',@error,value, @reset, ?'|acc], m, indent))
+      false -> to_iodata(l, color, case, errors, indent, indention([?', @enclosed , value, @reset, ?'|acc], m, indent))
+    end
+  end
+  defp to_iodata({:quote, m, [l, {:ident, [], value}]}, color, case, errors, indent, acc) do
+    to_iodata(l, color, case, errors, indent, indention([?',value, ?'|acc], m, indent))
+  end
+  defp to_iodata({:double_quote, m, [l, {:ident, [], value}]}=node, true=color, case, errors, indent, acc) do
+    case node in errors do
+      true -> to_iodata(l, color, case, errors, indent, indention([?",@error,value, @reset, ?"|acc], m, indent))
+      false -> to_iodata(l, color, case, errors, indent, indention([?", @enclosed , value, @reset, ?"|acc], m, indent))
+    end
+  end
+  defp to_iodata({:double_quote, m, [l, {:ident, [], value}]}, color, case, errors, indent, acc) do
+    to_iodata(l, color, case, errors, indent, indention([?",value, ?"|acc], m, indent))
+  end
   defp to_iodata({:quote, m, value}, true, _case, _errors, indent, acc) do
     indention([?',@enclosed, value, @reset,?'|acc], m, indent)
   end
@@ -157,21 +175,17 @@ defmodule SQL.Format do
   defp to_iodata({tag, [_,{_, :operator}|_], [left, right]}, color, case, errors, indent, acc) do
     to_iodata(left, color, case, errors, indent, to_iodata(tag, color, case, errors, indent, to_iodata(right, color, case, errors, indent, acc)))
   end
-
   defp to_iodata({tag, m, [{_,_,_}|_]=values}, color, case, errors, indent, acc) do
     indention(to_iodata(tag, color, case, errors, indent, to_iodata(values, color, case, errors, indent, acc)), m, 0)
   end
-  defp to_iodata({tag, m, value}=node, true, _case, errors, indent, acc) when tag in ~w[ident numeric special]a do
+  defp to_iodata({tag, m, value}=node, true, _case, errors, indent, acc) when tag in ~w[ident numeric integer special]a do
     case node in errors do
       true -> indention([@error, value, @reset|acc], m, indent)
       false -> indention([@literal, value, @reset|acc], m, indent)
     end
   end
-  defp to_iodata({tag, m, value}=node, false, _case, errors, indent, acc) when tag in ~w[ident numeric special]a do
-    case node in errors do
-      true -> indention([value|acc], m, indent)
-      false -> indention([value|acc], m, indent)
-    end
+  defp to_iodata({tag, m, value}, false, _case, _errors, indent, acc) when tag in ~w[ident numeric integer special]a do
+    indention([value|acc], m, indent)
   end
   defp to_iodata({:double_quote, m, value}=node, true, _case, errors, indent, acc) do
     case node in errors do
@@ -179,11 +193,8 @@ defmodule SQL.Format do
       false -> indention([?", @enclosed , value, @reset, ?"|acc], m, indent)
     end
   end
-  defp to_iodata({:double_quote, m, value}=node, false, _case, errors, indent, acc) do
-    case node in errors do
-      true -> indention([?",value, ?"|acc], m, indent)
-      false -> indention([?", value, ?"|acc], m, indent)
-    end
+  defp to_iodata({:double_quote, m, value}, false, _case, _errors, indent, acc) do
+    indention([?",value, ?"|acc], m, indent)
   end
   defp to_iodata(atom, _color, :lower, _errors, _indent, acc) when is_atom(atom) do
     ["#{atom}"|acc]

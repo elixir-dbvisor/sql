@@ -8,9 +8,9 @@ defmodule SQL.BNF do
   @moduledoc false
 
   @doc false
-  def parse(opts \\ %{}) do
+  def parse(opts \\ %{download: true, path: nil}) do
     case opts do
-      %{path: path} ->
+      %{path: <<path::binary>>} ->
           File.cwd!()
           |> Path.join(path)
           |> File.read!()

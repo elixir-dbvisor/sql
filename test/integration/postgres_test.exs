@@ -90,14 +90,12 @@ defmodule SQL.Integration.PostgresTest do
   use SQL, adapter: SQL.Adapters.Postgres
   alias SQL.Integration.Postgres.Types
 
+  describe "integration" do
+    setup tags do
+      SQL.begin(tags.test)
+      on_exit(fn -> SQL.rollback(tags.test) end)
+    end
 
-  setup tags do
-    SQL.begin(tags.test)
-    on_exit(fn -> SQL.rollback(tags.test) end)
-  end
-
-  @moduletag :integration
-  describe "data types" do
     for type <- Types.list() do
       @tag type: type.name
       test "round-trip #{type.name}" do
@@ -106,47 +104,39 @@ defmodule SQL.Integration.PostgresTest do
         assert [[value]] == Enum.to_list(sql)
       end
     end
-  end
 
-  describe "composite types" do
-    @tag type: :composite
     test "round-trip named" do
       sql = ~SQL"select (SELECT c FROM information_schema.columns c ORDER BY table_name, ordinal_position LIMIT 1)::information_schema.columns"
       assert [row] = Enum.to_list(sql)
-      assert length(row) == sql.c_len
+      assert length(row) == length(sql.types)
     end
 
     test "round-trip anonymous" do
       sql = ~SQL"SELECT ROW(1,1.5,'a','',NULL,true,false,1::int2,2::int4,3::int8,1.0::float4,2.0::float8,'2025-01-01'::date,'12:34:56'::time,'2025-01-01 12:34:56'::timestamp,'2025-01-01 12:34:56+00'::timestamptz,'{}'::int4[],ARRAY[1,2,3],ROW(1, 'x'),ROW(1, 'x')::record)"
       assert [row] = Enum.to_list(sql)
-      assert length(row) == sql.c_len
+      assert length(row) == length(sql.types)
     end
 
     test "round-trip *" do
       sql = ~SQL"SELECT * FROM information_schema.columns"
       assert [row|_] = Enum.to_list(sql)
-      assert length(row) == sql.c_len
+      assert length(row) == length(sql.types)
     end
-  end
 
-  describe "errors" do
-    # test "timeout raises outside transaction" do
-    #   Process.flag(:trap_exit, true)
-    #   assert_raise RuntimeError, ~s{canceling statement due to user request}, fn ->
-    #     Enum.to_list(Map.put(~SQL"SELECT pg_sleep(10)", :timeout, 100))
-    #   end
-    # end
+    test "db timeout raises outside transaction" do
+      assert_raise RuntimeError, ~s{canceling statement due to user request}, fn ->
+        Enum.to_list(Map.put(~SQL"SELECT pg_sleep(10)", :db_timeout, 100))
+      end
+    end
 
-    # test "non existing table raises outside transaction" do
-    #   Process.flag(:trap_exit, true)
-    #   assert_raise RuntimeError, ~s{relation "blackhole" does not exist}, fn ->
-    #     Enum.to_list(~SQL"SELECT id FROM blackhole")
-    #   end
-    # end
+    test "non existing table raises outside transaction" do
+      assert_raise RuntimeError, ~s{relation "blackhole" does not exist}, fn ->
+        Enum.to_list(~SQL"SELECT id FROM blackhole")
+      end
+    end
 
-    test "timeout" do
-      sql = Map.put(~SQL"SELECT pg_sleep(10)", :timeout, 100)
-      result = SQL.transaction do Enum.to_list(sql) end
+    test "db timeout errors inside transaction" do
+      result = SQL.transaction do Enum.to_list(Map.put(~SQL"SELECT pg_sleep(10)", :db_timeout, 100)) end
       assert {:error, %RuntimeError{message: "canceling statement due to user request"}} = result
     end
 
@@ -154,35 +144,40 @@ defmodule SQL.Integration.PostgresTest do
       result = SQL.transaction do Enum.to_list(~SQL"SELECT id FROM blackhole") end
       assert {:error, %RuntimeError{message: "relation \"blackhole\" does not exist"}} = result
     end
+
+    test "stream" do
+      SQL.transaction do
+        ~SQL"SELECT g::int as g, repeat(md5(g::text), 4) as md5 FROM generate_series(1, 501) AS g"
+        |> SQL.stream(max_rows: 500)
+        |> Stream.run()
+      end
+    end
+
+    test "transaction state are propagated" do
+      owner = Process.get(SQL.Transaction)
+      parent = self()
+      fun = fn -> send(parent, SQL.conn()) end
+      spawn_link(fun)
+      assert_receive ^owner
+
+      spawn(fun)
+      assert_receive ^owner
+
+      Task.async(fun)
+      assert_receive ^owner
+
+      Task.Supervisor.start_link(name: SQL.TaskSupervisor)
+      Task.Supervisor.async_nolink(SQL.TaskSupervisor, fun)
+      assert_receive ^owner
+    end
   end
 
-  test "transaction state are propagated" do
-    {_owner, conn} = Process.get(SQL.Transaction)
-    parent = self()
-    fun = fn -> send(parent, SQL.conn(:default)) end
-    spawn_link(fun)
-    assert_receive ^conn
-
-    spawn(fun)
-    assert_receive ^conn
-
-    Task.async(fun)
-    assert_receive ^conn
-
-    Task.Supervisor.start_link(name: SQL.TaskSupervisor)
-    Task.Supervisor.async_nolink(SQL.TaskSupervisor, fun)
-    assert_receive ^conn
-  end
-
-  test "connection pool is self healing" do
-    conn = elem(:persistent_term.get(:default), 0)
-    Process.exit(conn, :shutdown)
-    Process.sleep(50)
-    refute elem(:persistent_term.get(:default), 0) == conn
-
-    conn = elem(:persistent_term.get(:default), 0)
-    Process.exit(conn, :normal)
-    Process.sleep(50)
-    refute elem(:persistent_term.get(:default), 0) == conn
+  test "raise error if socket is closed" do
+    SQL.begin(:error)
+    {_owner, socket, _conn} = Process.get(SQL.Transaction)
+    :socket.shutdown(socket, :read_write)
+    assert_raise RuntimeError, ~s{connection closed}, fn ->
+      Enum.to_list(~SQL"SELECT 1")
+    end
   end
 end
