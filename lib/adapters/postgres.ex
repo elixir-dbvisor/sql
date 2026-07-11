@@ -35,8 +35,16 @@ defmodule SQL.Adapters.Postgres do
 
   def init(state) do
     Process.flag(:trap_exit, true)
-    startup(state)
+    startup(resolve_addr(state))
   end
+
+  defp resolve_addr(%{hostname: hostname, family: family} = state) when is_binary(hostname) and hostname != "" do
+    case :inet.getaddr(String.to_charlist(hostname), family) do
+      {:ok, addr} -> %{state | addr: addr}
+      {:error, _} -> state
+    end
+  end
+  defp resolve_addr(state), do: state
 
   defp cancel(%{domain: domain, type: type, protocol: protocol, pid: pid, secret: secret} = state) do
     {:ok, socket} = :socket.open(domain, type, protocol, Map.take(state, [:netns, :use_registry, :debug]))
