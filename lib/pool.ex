@@ -41,19 +41,30 @@ defmodule SQL.Pool do
     sockets: nil,
   ]
 
-  def start_link(state) do
-    Supervisor.start_link(__MODULE__, state, name: state.name)
+  def start_link(config) do
+    Supervisor.start_link(__MODULE__, config, name: config[:name])
   end
 
   @impl true
-  def init(state) do
-    {_metrics, sockets, _state, _queue, _prepared} = :persistent_term.get(state.name)
+  def init(config) do
+    size = config[:size] || :erlang.system_info(:schedulers)
+    opts = [signed: true]
+    metrics = :atomics.new(3, opts)
+    state = :atomics.new(size, opts)
+    opts = [:set, :public,  {:write_concurrency, :auto}, {:read_concurrency, true}, {:decentralized_counters, true}]
+    sockets = :ets.new(:sockets, opts)
+    prepared = :ets.new(:sql, opts)
+    queue = :ets.new(:queue, opts)
+    for n <- 1..size, do: :atomics.put(state,n,1)
+    for n <- 1..3, do: :atomics.put(metrics,n,0)
+    pool = %{struct(__MODULE__, config)| size: size, state: state, metrics: metrics, queue: queue, sockets: sockets, prepared: prepared}
+    :persistent_term.put(pool.name, {metrics, sockets, state, queue, prepared})
     children =
-      for n <- 1..state.size do
+      for n <- 1..size do
         handle = make_ref()
         %{
           id: handle,
-          start: {state.adapter, :start, [%{state | scheduler_id: n, sockets: sockets, handle: handle, state: state.state}]},
+          start: {pool.adapter, :start, [%{pool | scheduler_id: n, sockets: sockets, handle: handle}]},
           restart: :permanent,
           shutdown: 5000,
           type: :worker,

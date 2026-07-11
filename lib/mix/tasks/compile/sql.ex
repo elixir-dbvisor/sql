@@ -46,19 +46,18 @@ defmodule Mix.Tasks.Compile.Sql do
   end
 
   def decoders() do
+    path = Mix.Project.compile_path()
     :dets.open_file(:sql, [type: :set, ram_file: true])
-    :dets.traverse(:sql, fn record ->
-      case record do
-        {module, t, mod, loc} ->
-          path = Path.join(Mix.Project.compile_path(), "#{module}.beam")
-          case Code.ensure_compiled(module) do
-            {:module, _} -> :continue
-            {:error, _} ->
-              {:module, ^module, binary, _term} = Module.create(module, mod.build_decoder(t), loc)
-              File.write!(path, binary)
-          end
+    :dets.traverse(:sql, fn
+      {module, t, mod, loc} ->
+        path = Path.join(path, "#{module}.beam")
+        case File.exists?(path) do
+          true -> :continue
+          false ->
+            {:module, ^module, binary, _term} = Module.create(module, mod.build_decoder(t), loc)
+            File.write!(path, binary)
+        end
         _ -> :continue
-      end
     end)
     :ok
   end

@@ -173,17 +173,12 @@ defmodule SQL.Adapters.Postgres do
   end
 
   def prepare_execute(socket, conn, %SQL{id: id, msg: [_parse, pbe, be, _execute, _close]}=sql, prepared) do
-    ref = Process.send_after(conn, :cancel, sql.db_timeout)
     timestamp = :erlang.monotonic_time(:millisecond)
+    ref = Process.send_after(conn, :cancel, sql.db_timeout)
     key = {:erlang.phash2({id, conn}), 1}
-    msg = if :ets.select_count(prepared, [{key, [], [true]}]) == 1 do
-      be
-    else
-      :ets.insert(prepared, key)
-      pbe
-    end
+    msg = if :ets.select_count(prepared, [{key, [], [true]}]) == 1, do: be, else: pbe
     send_data(socket, msg, sql)
-    result = drain(socket, conn, sql, make_ref())
+    result = drain(socket, conn, sql, make_ref(), key, prepared)
     Process.cancel_timer(ref)
     {:ok, result, :erlang.monotonic_time(:millisecond)-timestamp}
   end
@@ -209,7 +204,7 @@ defmodule SQL.Adapters.Postgres do
   defp split("", "", acc), do: acc
   defp split("", v, acc), do: [v|acc]
 
-  defp drain(socket, conn, sql, ref) do
+  defp drain(socket, conn, sql, ref, key, prepared) do
     case :socket.recv(socket, 0, [], ref) do
       {:error, :closed} ->
         Process.exit(conn, :normal)
@@ -217,31 +212,31 @@ defmodule SQL.Adapters.Postgres do
       {:select, {:select_info, :recv, ^ref}} ->
         receive do
           {:"$socket", ^socket, :select, ^ref} ->
-            drain(socket, conn, sql, ref)
+            drain(socket, conn, sql, ref, key, prepared)
         end
       {:ok, data} ->
-        process(data, socket, sql, [], ref)
+        process(data, socket, sql, [], ref, key, prepared)
       {_, {_, <<data::binary>>}} ->
-        process(data, socket, sql, [], ref)
+        process(data, socket, sql, [], ref, key, prepared)
     end
   end
 
-  defp more(buffer, socket, sql, rows, ref) do
+  defp more(buffer, socket, sql, rows, ref, key, prepared) do
     case :socket.recv(socket, 0, [], ref) do
-      {:ok, data} -> process(IO.iodata_to_binary([buffer, data]), socket, sql, rows, ref)
-      {_, {_, <<data::binary>>}} -> process(IO.iodata_to_binary([buffer, data]), socket, sql, rows, ref)
+      {:ok, data} -> process(IO.iodata_to_binary([buffer, data]), socket, sql, rows, ref, key, prepared)
+      {_, {_, <<data::binary>>}} -> process(IO.iodata_to_binary([buffer, data]), socket, sql, rows, ref, key, prepared)
       {:select, {:select_info, :recv, ^ref}} ->
         receive do
           {:"$socket", ^socket, :select, ^ref} ->
-            more(buffer, socket, sql, rows, ref)
+            more(buffer, socket, sql, rows, ref, key, prepared)
         end
     end
   end
 
-  defp process(<<rest::binary>>, socket, sql, rows, ref) do
+  defp process(<<rest::binary>>, socket, sql, rows, ref, key, prepared) do
     case rest do
       <<?D, len::32, _::16, row::binary-size(len-6), rest::binary>>->
-        process(rest, socket, sql, [sql.decoder.decode_row(row, sql)|rows], ref)
+        process(rest, socket, sql, [sql.decoder.decode_row(row, sql)|rows], ref, key, prepared)
       <<?C, len::32, "SELECT ", _count::binary-size(len-12), 0, 51, 4::32>> ->
         :lists.reverse(rows)
       <<?C, len::32, "UPDATE ", _count::binary-size(len-12), 0, 51, 4::32>> ->
@@ -270,19 +265,20 @@ defmodule SQL.Adapters.Postgres do
         send_data(socket, @sync)
         raise RuntimeError, error(data)[:message]
       <<?Z, len::32, _::binary-size(len-4), rest::binary>> ->
-        process(rest, socket, sql,  rows, ref)
+        process(rest, socket, sql,  rows, ref, key, prepared)
       <<?s, len::32, _payload::binary-size(len-4), rest::binary>> ->
         %SQL{msg: [_parse, _pbe, _be, execute, _close]}=sql
         send_data(socket, execute, sql)
-        more([rest], socket, sql, rows, ref)
+        more([rest], socket, sql, rows, ref, key, prepared)
       <<50, 4::32, 51, 4::32>> ->
         rows
       <<50, 4::32, rest::binary>> ->
-        process(rest, socket, sql,  rows, ref)
+        process(rest, socket, sql,  rows, ref, key, prepared)
       <<49, 4::32, rest::binary>> ->
-        process(rest, socket, sql,  rows, ref)
+        :ets.insert(prepared, key)
+        process(rest, socket, sql,  rows, ref, key, prepared)
       <<rest::binary>>->
-        more([rest], socket, sql, rows, ref)
+        more([rest], socket, sql, rows, ref, key, prepared)
     end
   end
 

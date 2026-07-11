@@ -18,7 +18,6 @@ defmodule SQL.MixProject do
       docs: docs(),
       package: package(),
       elixirc_paths: elixirc_paths(Mix.env()),
-      # compilers: [:sql] ++ Mix.compilers(),
       aliases: [test: ["sql.create --quiet", "test"]]
     ]
   end

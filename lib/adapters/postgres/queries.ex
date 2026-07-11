@@ -122,8 +122,6 @@ defmodule SQL.Adapters.Postgres.Queries do
   #   end
   # end
 
-
-
   @doc false
   def count_database(%{name: pool, database: database}) do
     SQL.transaction do
@@ -193,14 +191,16 @@ defmodule SQL.Adapters.Postgres.Queries do
   def maintiance(:create, name, config), do: Map.put_new(maintiance(name, config), :encoding, "UTF8")
 
   defp maintiance(name, config) do
-    stat = :atomics.new(1, [signed: true])
-    metrics = :atomics.new(3, [signed: true])
-    for n <- 1..1, do: :atomics.put(stat,n,1)
+    opts = [signed: true]
+    state = :atomics.new(1, opts)
+    metrics = :atomics.new(3, opts)
+    for n <- 1..1, do: :atomics.put(state,n,1)
     for n <- 1..3, do: :atomics.put(metrics,n,0)
-    sockets = :ets.new(:sockets, [:set, :public, {:read_concurrency, true}])
-    queue = :ets.new(:queue, [:set, :public, {:write_concurrency, :auto}, {:read_concurrency, true}, {:decentralized_counters, true}])
-    prepared = :ets.new(:queue, [:set, :public, {:write_concurrency, :auto}, {:read_concurrency, true}, {:decentralized_counters, true}])
-    :persistent_term.put(name, {metrics, sockets, stat, queue, prepared})
-    Map.merge(struct(SQL.Pool, [{:name, name}|config]), %{size: 1, state: stat, queue: queue, metrics: metrics, handle: make_ref(), sockets: sockets, scheduler_id: 1, database: "postgres"})
+    opts = [:set, :public,  {:write_concurrency, :auto}, {:read_concurrency, true}, {:decentralized_counters, true}]
+    sockets = :ets.new(:sockets, opts)
+    queue = :ets.new(:queue, opts)
+    prepared = :ets.new(:queue, opts)
+    :persistent_term.put(name, {metrics, sockets, state, queue, prepared})
+    Map.merge(struct(SQL.Pool, [{:name, name}|config]), %{size: 1, state: state, queue: queue, metrics: metrics, handle: make_ref(), sockets: sockets, scheduler_id: 1, database: "postgres"})
   end
 end
