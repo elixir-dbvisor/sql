@@ -712,9 +712,11 @@ defmodule SQL.Parser do
     end
   end
   defp resolve_column(node, aliases, _columns) do
-    {type(node, aliases), __column__(node, aliases)}
+    case type(node, aliases) do
+      [{_, _}=pair] -> pair
+      type -> {type, __column__(node, aliases)}
+    end
   end
-
 
   defp __column__({:ident, _, col}, _aliases), do: :"#{col}"
   # defp __column__({col, _, []}, _aliases), do: col
