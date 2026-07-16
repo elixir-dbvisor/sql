@@ -186,20 +186,20 @@ defmodule SQL.Adapters.MySQLTest do
   end
 
   describe "interpolation" do
-    # test "binding" do
-    #   var1 = 1
-    #   var0 = "id"
-    #   var2 = ~SQL[select {{var0}}]
-    #   assert "select ?" == to_string(var2)
-    #   sql = ~SQL[select {{var2}}, {{var1}}]
-    #   assert "select ?, ?" == to_string(sql)
-    # end
+    test "binding" do
+      var1 = 1
+      var0 = "id"
+      var2 = ~SQL[select {{var0}}]
+      assert "select ?" == to_string(var2)
+      sql = ~SQL[select {{var2}}, {{var1}}]
+      assert "select ?, ?" == to_string(sql)
+    end
 
-    # test ". syntax" do
-    #   map = %{k: "v"}
-    #   sql = ~SQL[select {{map.k <> "v"}}]
-    #   assert "select ?" == to_string(sql)
-    # end
+    test ". syntax" do
+      map = %{k: "v"}
+      sql = ~SQL[select {{map.k <> "v"}}]
+      assert "select ?" == to_string(sql)
+    end
 
     test "code" do
       sql = ~SQL[select {{0}}, {{%{k: 1}}}]

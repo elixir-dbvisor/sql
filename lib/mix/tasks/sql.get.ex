@@ -12,7 +12,7 @@ defmodule Mix.Tasks.Sql.Get do
     Application.load(app)
     Mix.Task.run("app.config", args)
     Application.ensure_all_started(:sql, :permanent)
-    lock = Enum.reduce(Application.get_env(:sql, :pools), [], &(Module.concat(elem(&1, 1)[:adapter], Queries).lock(elem(&1, 0))++&2))
+    lock = Enum.reduce(Application.get_env(:sql, :pools), [], &(Module.concat(elem(&1, 1)[:adapter], Queries).columns(elem(&1, 0))++&2))
     create_file("sql.lock", lock_template(lock: lock), force: true)
   end
 

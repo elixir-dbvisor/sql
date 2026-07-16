@@ -10,7 +10,8 @@ defmodule SQL do
   alias SQL.Adapters.ANSI
 
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
+    quote do
+      opts = unquote(opts)
       if Mix.Project.get() != SQL.MixProject, do: Application.ensure_all_started(:sql, :permanent)
       @doc false
       import SQL
@@ -33,15 +34,7 @@ defmodule SQL do
     end
   end
 
-  defstruct [tokens: [], params: [], columns: [], types: nil, decoder: nil, adapter: nil, module: nil, id: nil, string: nil, inspect: nil, fn: nil, context: nil, pool: :default, db_timeout: 15000, msg: nil, max_rows: 0, acc: nil, queue_timeout: 250]
-
-  defimpl Inspect, for: SQL do
-    def inspect(%{inspect: nil, tokens: tokens, context: context}, _opts) do
-      {:current_stacktrace, stack} = Process.info(self(), :current_stacktrace)
-      SQL.__inspect__(tokens, context, hd(stack))
-    end
-    def inspect(%{inspect: inspect}, _opts), do: inspect
-  end
+  defstruct [tokens: [], params: [], vars: [], columns: [], types: nil, decoder: nil, adapter: nil, module: nil, id: nil, string: nil, inspect: nil, fn: nil, context: nil, pool: :default, db_timeout: 15000, msg: nil, max_rows: 0, acc: nil, queue_timeout: 250]
 
   defimpl String.Chars, for: SQL do
     def to_string(sql), do: sql.string
@@ -230,10 +223,12 @@ defmodule SQL do
     {:ok, context, tokens} = SQL.Lexer.lex(binary)
     {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
     {:ok, t, c, types, params} = SQL.Parser.describe(tokens, [])
-    id = :erlang.phash2({adapter, binary})
-    {string, decoder, encoder, acc} = adapter.static(tokens, %{context | module: adapter}, t, types, params, id, max_rows)
-    {params, _, _} = Code.eval_quoted_with_env(encoder, binding, Code.env_for_eval(__ENV__))
-    struct(SQL, id: id, params: params, columns: c, msg: adapter.dynamic(types, params, length(t), acc), decoder: decoder, types: t, adapter: adapter, fn: fun, pool: pool, tokens: tokens, string: string, context: context)
+
+    SQL
+    |> struct(id: :erlang.phash2({adapter, binary}), columns: c, types: t, adapter: adapter, fn: fun, pool: pool, tokens: tokens, context: context, max_rows: max_rows)
+    |> adapter.static(tokens, %{context | module: adapter}, t, types, params)
+    |> Code.eval_quoted_with_env(binding, Code.env_for_eval(__ENV__))
+    |> elem(0)
   end
 
   @doc false
@@ -251,42 +246,57 @@ defmodule SQL do
       {:static, data, max_rows} ->
         id = id(data, config.adapter)
         {:ok, context, tokens} = SQL.Lexer.lex(data, env.file)
-        {:ok, context, tokens} = SQL.Parser.parse(tokens, %{context|validate: config.validate, module: config.adapter, case: config.case})
-        {:ok, t, c, types, params} = SQL.Parser.describe(tokens, columns)
-        {string, decoder, encoder, acc} = config.adapter.static(tokens, context, t, types, params, id, max_rows)
-        inspect = __inspect__(tokens, context, stack)
-        sql = %{sql | params: [], columns: c, decoder: decoder, types: t, tokens: tokens, string: string, inspect: inspect, id: id}
-        count = length(t)
-        case context.binding do
-          0 -> Macro.escape(%{sql | msg: config.adapter.dynamic(types, params, count, acc)})
-          _ ->
-            quote do
-              params = unquote(encoder)
-              %{unquote(Macro.escape(sql)) | params: params, msg: unquote(config.adapter).dynamic(unquote(types), params, unquote(count), unquote(acc))}
-            end
-        end
-
+        {:ok, context, parse_tokens} = SQL.Parser.parse(tokens, %{context|validate: config.validate, module: config.adapter, case: config.case})
+        {:ok, t, c, types, params} = SQL.Parser.describe(parse_tokens, columns)
+        inspect = SQL.Inspect.to_string(parse_tokens, context, stack)
+        config.adapter.static(%{sql | tokens: tokens, vars: params, types: t, columns: c, inspect: inspect, id: id, max_rows: max_rows}, parse_tokens, context, t, types, params)
       {:dynamic, data, max_rows} ->
         id = id(data, config.adapter)
-        sql = %{sql | id: id}
+        sql = %{sql | id: id, max_rows: max_rows}
         quote do
-          {t,p} = collect(unquote(Macro.unpipe(left)))
-          {:ok, context, tokens} = tokens(unquote(right), unquote(env.file), unquote(id))
+          {t, v} = collect(unquote(Macro.unpipe(left)))
+          {:ok, context, tokens} = case :persistent_term.get(unquote({id, :lex}), nil) do
+            nil ->
+              result = SQL.Lexer.lex(unquote(right), unquote(env.file))
+              :persistent_term.put(unquote({id, :lex}), result)
+              result
+
+            result ->
+              result
+          end
           tokens = t++tokens
-          {{string, decoder, encoder, acc}, t, c, types, inspect, params} = plan(tokens, %{context | validate: nil, module: unquote(config.adapter), format: :dynamic}, unquote(id), unquote(Macro.escape(stack)), unquote(Macro.escape(columns)), unquote(max_rows))
-          {params, _, _} = Code.eval_quoted_with_env(encoder, binding(), unquote(Macro.escape(Code.env_for_eval(env))))
-          params = params ++ p
-          %{unquote(Macro.escape(sql)) | params: params, columns: c, msg: unquote(config.adapter).dynamic(types, params, length(t), acc), types: t, decoder: decoder, tokens: tokens, string: string, inspect: inspect}
+          key = {:erlang.phash2(tokens), :plan}
+          {context, parsed_tokens, tokens, t, c, types, params, inspect} = case :persistent_term.get(key, nil) do
+                                                                    nil ->
+                                                                      context = %{context | validate: nil, module: unquote(config.adapter), format: :dynamic}
+                                                                      {:ok, context, parsed_tokens} = SQL.Parser.parse(tokens, context)
+                                                                      {:ok, t, c, types, params} = SQL.Parser.describe(parsed_tokens, unquote(Macro.escape(columns)))
+                                                                      result = {context, parsed_tokens, tokens, t, c, types, params, SQL.Inspect.to_string(parsed_tokens, context, unquote(Macro.escape(stack)))}
+                                                                      :persistent_term.put(key, result)
+                                                                      result
+                                                                    result ->
+                                                                      result
+                                                                  end
+          binding = binding()
+          vars = for {var, _, nil} <- params do
+                    case binding[var] do
+                      nil -> {var, v[var]}
+                      val -> {var, val}
+                    end
+                  end
+          %{unquote(Macro.escape(sql)) | tokens: tokens, columns: c, types: t, inspect: inspect, vars: vars}
+          |> context.module.static(parsed_tokens, context, t, types, params)
+          |> Code.eval_quoted_with_env(vars, unquote(Macro.escape(Code.env_for_eval(env))))
+          |> elem(0)
         end
     end
   end
 
   @doc false
   def collect(value), do: collect(value, [], [])
-
-  defp collect([], tokens, params), do: {tokens, params}
-  defp collect([{[], 0}|rest], tokens, params), do: collect(rest, tokens, params)
-  defp collect([{%{tokens: t, params: p}, 0}|rest], tokens, params), do: collect(rest, tokens++t, params++p)
+  defp collect([], tokens, vars), do: {tokens, vars}
+  defp collect([{[], 0}|rest], tokens, vars), do: collect(rest, tokens, vars)
+  defp collect([{%{tokens: t, vars: v}, 0}|rest], tokens, vars), do: collect(rest, tokens++t, vars++v)
 
   @doc false
   def build(left, {tag, _, _} = right, _env) when tag in ~w[fn &]a do
@@ -333,64 +343,7 @@ defmodule SQL do
   end
 
   @doc false
-  def tokens(binary, file, id) do
-    key = {id, :lex}
-    case :persistent_term.get(key, nil)  do
-      nil ->
-        result = SQL.Lexer.lex(binary, file)
-        :persistent_term.put(key, result)
-        result
-
-      result ->
-        result
-    end
-  end
-
-  @doc false
-  def plan(tokens, context, id, stack, columns, max_rows) do
-    key = {context.module, id, :plan}
-    case :persistent_term.get(key, nil) do
-      nil ->
-        {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
-        {:ok, t, c, types, params} = SQL.Parser.describe(tokens, columns)
-        format = {context.module.static(tokens, context, t, types, params, id, max_rows), t, c, types, __inspect__(tokens, context, stack), params}
-        :persistent_term.put(key, format)
-        format
-
-      format ->
-        format
-    end
-  end
-
-  @error IO.ANSI.red()
-  @reset IO.ANSI.reset()
-
-  @doc false
-  def __inspect__(tokens, context, stack) do
-    inspect = IO.iodata_to_binary([@reset, "~SQL\"\"\""|[SQL.Format.to_iodata(tokens, context, 0, true)|~c"\n\"\"\""]])
-    case context.errors do
-      [] -> inspect
-      errors ->
-        {:current_stacktrace, [_|t]} = Process.info(self(), :current_stacktrace)
-        IO.warn([?\n,format_error(errors), IO.iodata_to_binary([@reset, "  ~SQL\"\"\""|[SQL.Format.to_iodata(tokens, context, 1, true)|~c"\n  \"\"\""]])], [stack|t])
-        inspect
-    end
-  end
-
-  @doc false
-  def format_error(errors) do
-    errors
-    |> Enum.group_by(&elem(&1, 2))
-    |> Enum.reduce([], fn
-      {k, [{:special, _, _}]}, acc -> [acc|["  the operator", @error,k,@reset, " is invalid, did you mean any of #{__suggest__(k)}\n"]]
-      {k, [{:special, _, _}|_]=v}, acc -> [acc|["  the operator ",@error,k,@reset," is mentioned #{length(v)} times but is invalid, did you mean any of #{__suggest__(k)}\n"]]
-      {k, [_]}, acc -> [acc|["  the relation ",@error,k,@reset," does not exist\n"]]
-      {k, v}, acc -> [acc|["  the relation ",@error,k,@reset," is mentioned #{length(v)} times but does not exist\n"]]
-    end)
-  end
-
-  @doc false
-  def reduce(%SQL{msg: {_string, nil, nil}}, _acc, _fun) do
+  def reduce(%SQL{msg: nil}, _acc, _fun) do
     raise RuntimeError, "Invalid Something"
   end
   def reduce(sql, acc, fun) do
@@ -437,9 +390,6 @@ defmodule SQL do
       Process.get(SQL.Transaction)
     end
   end
-
-  @doc false
-  def __suggest__(k), do: Enum.join(SQL.Lexer.suggest_operator(:erlang.iolist_to_binary(k)), ", ")
 
   defimpl Enumerable, for: SQL do
     def count(_enumerable), do: {:error, __MODULE__}

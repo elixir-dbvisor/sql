@@ -180,7 +180,7 @@ defmodule SQL.Adapters.Postgres do
     :ok
   end
 
-  def prepare_execute(socket, conn, %SQL{id: id, msg: [_parse, pbe, be, _execute, _close]}=sql, prepared) do
+  def prepare_execute(socket, conn, %SQL{id: id, msg: {_parse, pbe, be, _execute, _close}}=sql, prepared) do
     timestamp = :erlang.monotonic_time(:millisecond)
     ref = Process.send_after(conn, :cancel, sql.db_timeout)
     key = {:erlang.phash2({id, conn}), 1}
@@ -275,7 +275,7 @@ defmodule SQL.Adapters.Postgres do
       <<?Z, len::32, _::binary-size(len-4), rest::binary>> ->
         process(rest, socket, sql,  rows, ref, key, prepared)
       <<?s, len::32, _payload::binary-size(len-4), rest::binary>> ->
-        %SQL{msg: [_parse, _pbe, _be, execute, _close]}=sql
+        %SQL{msg: {_parse, _pbe, _be, execute, _close}}=sql
         send_data(socket, execute, sql)
         more([rest], socket, sql, rows, ref, key, prepared)
       <<50, 4::32, 51, 4::32>> ->
@@ -316,25 +316,57 @@ defmodule SQL.Adapters.Postgres do
     end
   end
 
-  @doc false
-  def dynamic(_types, params, count, [prepare, bind, execute, close]) do
-    bind = bind(params, count, bind)
-    [prepare, prepare<>bind<>execute, bind<>execute, execute, close]
-  end
-
-  defp static(_tokens, t, types, params, count, id, max_rows, string) do
+  defp static(%{id: id, max_rows: max_rows} = sql, _tokens, t, types, params, 0, string) do
     portal = "p_#{id}"
     name = "sql_#{id}"
-    parse = parse(types, <<name::binary,0,string::binary,0,count::16-big>>)
-    bind = bind(portal, name, count)
+    parse = SQL.Adapters.Postgres.parse(types, <<name::binary,0,string::binary,0,0::16-big>>)
+    bind = <<portal::binary,0,name::binary,0,0::16-big,""::binary,0::16-big>>
     len = byte_size(portal)+6
-    execute = execute(portal, len, max_rows)
-    close = close(portal, len)
-    {string, decoder(t), encoder(Enum.reverse(types), params, []), [parse, bind, execute, close]}
+    execute = case max_rows do
+        0 ->
+          <<?E,len+3::32,portal::binary,0,max_rows::32-big,?C,len::32,?P,portal::binary,0,?H,4::32-big>>
+        max_rows ->
+          <<?E,len+3::32,portal::binary,0,max_rows::32-big,?H,4::32-big>>
+      end
+    count = length(t)
+    acc = <<bind::binary, count::16-big, formats(count)::binary>>
+    be = <<?B,byte_size(acc)+4::32-big, acc::binary, execute::binary>>
+    Macro.escape(%{sql | decoder: SQL.Adapters.Postgres.decoder(t), string: string, params: params, msg: {parse, parse<>be, be, execute, <<?C,len::32,?P,portal::binary,0,?S,4::32-big>>}})
   end
 
-  defp decoder([]), do: nil
-  defp decoder(t) do
+  defp static(%{id: id, max_rows: max_rows} = sql, _tokens, t, types, params, count, string) do
+    portal = "p_#{id}"
+    name = "sql_#{id}"
+    parse = SQL.Adapters.Postgres.parse(types, <<name::binary,0,string::binary,0,count::16-big>>)
+    bind = <<portal::binary,0,name::binary,0,count::16-big,SQL.Adapters.Postgres.formats(count)::binary,count::16-big>>
+    len = byte_size(portal)+6
+    execute = case max_rows do
+        0 ->
+          <<?E,len+3::32,portal::binary,0,max_rows::32-big,?C,len::32,?P,portal::binary,0,?H,4::32-big>>
+        max_rows ->
+          <<?E,len+3::32,portal::binary,0,max_rows::32-big,?H,4::32-big>>
+      end
+    decoder = SQL.Adapters.Postgres.decoder(t)
+    count = length(t)
+    p = for ast <- SQL.Adapters.Postgres.encoder(Enum.reverse(types), params, []), do: quote(do: unquote(ast)::binary)
+    close = <<?C,len::32,?P,portal::binary,0,?S,4::32-big>>
+    sql = %{sql | types: t, decoder: decoder, string: string}
+    format = SQL.Adapters.Postgres.formats(count)
+    quote do
+      acc = <<unquote(bind)::binary, unquote_splicing(p), unquote(count)::16-big, unquote(format)::binary>>
+      be = <<?B,byte_size(acc)+4::32-big, acc::binary, unquote(execute)::binary>>
+      %{unquote(Macro.escape(sql)) | params: unquote(Enum.reverse(params)), msg: {unquote(parse), unquote(parse)<>be, be, unquote(execute), unquote(close)}}
+    end
+  end
+
+  def encoder([], [], []), do: [<<>>]
+  def encoder([], [], acc), do: acc
+  def encoder([t|types], [p|params], acc), do: encoder(types, params, [encode(t, p)|acc])
+
+
+
+  def decoder([]), do: nil
+  def decoder(t) do
     mod = Module.concat([__MODULE__.Decoder, "#{:erlang.phash2(t)}"])
     if :erlang.module_loaded(mod) == false do
       case Code.ensure_compiled(mod) do
@@ -354,37 +386,11 @@ defmodule SQL.Adapters.Postgres do
     end
   end
 
-  defp encoder([], [], acc), do: acc
-  defp encoder([t|types], [p|params], acc), do: encoder(types, params, [encode(t, p)|acc])
+  def parse([], acc), do: <<?P,byte_size(acc)+4::32-big,acc::binary>>
+  def parse([type | rest], acc), do: parse(rest, <<acc::binary,oid(type)::binary>>)
 
-  defp bind(<<portal::binary>>, name, count) do
-    <<portal::binary,0,name::binary,0,count::16-big,formats(count)::binary,count::16-big>>
-  end
-
-  defp bind([], count, acc) do
-    acc = <<acc::binary, count::16-big, formats(count)::binary>>
-    <<?B,byte_size(acc)+4::32-big,acc::binary>>
-  end
-  defp bind([param | params], count, acc) do
-    bind(params, count, <<acc::binary, param::binary>>)
-  end
-
-  defp execute(portal, len, max_rows) do
-    case max_rows do
-      0 ->
-        <<?E,len+3::32,portal::binary,0,max_rows::32-big,?C,len::32,?P,portal::binary,0,?H,4::32-big>>
-      max_rows ->
-        <<?E,len+3::32,portal::binary,0,max_rows::32-big,?H,4::32-big>>
-    end
-  end
-
-  defp close(portal, len), do: <<?C,len::32,?P,portal::binary,0,?S,4::32-big>>
-
-  defp parse([], acc), do: <<?P,byte_size(acc)+4::32-big,acc::binary>>
-  defp parse([type | rest], acc), do: parse(rest, <<acc::binary,oid(type)::binary>>)
-
-  defp formats(0), do: ""
-  defp formats(n), do: <<1::16-big, formats(n-1)::binary>>
+  def formats(0), do: ""
+  def formats(n), do: <<1::16-big, formats(n-1)::binary>>
 
   defp oid(type) do
     case :persistent_term.get({:default, :oids}, nil) do
@@ -399,6 +405,7 @@ defmodule SQL.Adapters.Postgres do
   defp base_types([{:record, type}=t|types], acc), do: base_types(types, [t|base_types(type, acc)])
   defp base_types([type|types], acc), do: base_types(types, [type|acc])
 
+  defp gen_helpers([], [acc]), do: acc
   defp gen_helpers([], acc), do: acc
   defp gen_helpers([{:array, type}|types], acc), do: gen_helpers(types, [elem(array(type), 2)|acc])
   defp gen_helpers([{:record, type}|types], acc), do: gen_helpers(types, [elem(record(type), 2)|acc])

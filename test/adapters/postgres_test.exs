@@ -224,53 +224,70 @@ defmodule SQL.Adapters.PostgresTest do
       var1 = 1
       var0 = "id"
       var2 = ~SQL[select {{var0}}::text]
-      assert [<<0,0,0,2,"id">>] == var2.params
+      assert [^var0] = var2.params
       sql = ~SQL[select {{var0}}::text, {{var1}}::int4]
-      assert [<<0,0,0,2,"id">>, <<0, 0, 0, 4, 0, 0, 0, 1>>] == sql.params
+      assert [^var0, ^var1] = sql.params
       assert "select $1::text, $2::int4" == to_string(sql)
     end
 
+    test "functional" do
+      sql = from()
+      |> ~SQL[select id, email, inserted_at, updated_at]
+      |> where()
+
+      assert " select id, email, inserted_at, updated_at from users u where u.email::text = $1" == to_string(sql)
+      assert ["john@example.com"] == sql.params
+
+      sql = from()
+      |> ~SQL[select id, email, {{1}}::int4, updated_at]
+      |> where()
+
+      assert " select id, email, $0::int4, updated_at from users u where u.email::text = $1" == to_string(sql)
+      assert [1, "john@example.com"] == sql.params
+
+      var2 = 1
+      sql = from()
+            |> ~SQL[select id, email, {{var2}}::int4, updated_at]
+            |> where()
+
+      assert " select id, email, $0::int4, updated_at from users u where u.email::text = $1" == to_string(sql)
+      assert [1, "john@example.com"] == sql.params
+    end
 
     test ". syntax" do
       map = %{k: "v"}
       sql = ~SQL[select {{map.k <> "v"}}::text]
-      assert [<<0,0,0,2,"vv">>] == sql.params
+      assert ["vv"] == sql.params
       assert "select $1::text" == to_string(sql)
     end
 
     test "code" do
       sql = ~SQL[select {{0}}::int4, {{%{k: 1}}}::hstore]
-      assert [<<0, 0, 0, 4, 0, 0, 0, 0>>, <<0, 0, 0, 4, 0, 0, 0, 1>>] == sql.params
+      assert [0, %{k: 1}] == sql.params
       assert "select $1::int4, $2::hstore" == to_string(sql)
     end
 
     test "in" do
       sql = ~SQL"select {{1}}::int4 in {{[1, 2]}}::int4[]"
-      assert [
-        <<0, 0, 0, 4, 0, 0, 0, 1>>,
-        <<0, 0, 0, 36, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 23, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 2>>
-             ] == sql.params
+      assert [1, [1, 2]] == sql.params
       assert "select $1::int4 in $2::int4[]" == to_string(sql)
 
       sql = ~SQL"select {{1}}::int4 not in {{[1, 2]}}::int4[]"
-      assert [
-        <<0, 0, 0, 4, 0, 0, 0, 1>>,
-        <<0, 0, 0, 36, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 23, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 2>>
-             ] == sql.params
+      assert [1, [1, 2]] == sql.params
       assert "select $1::int4 not in $2::int4[]" == to_string(sql)
     end
 
     test "mixin" do
       for email <- ["1@example.com", "2@example.com", "3@example.com"] do
         sql = from() |> ~SQL[select id, email, inserted_at, updated_at] |> where(email)
-        assert {" select id, email, inserted_at, updated_at from users u where u.email::text = $1", ["\0\0\0\r" <> email]} == SQL.to_sql(sql)
+        assert {" select id, email, inserted_at, updated_at from users u where u.email::text = $1", [email]} == SQL.to_sql(sql)
       end
     end
 
     test "preserve order" do
       name = "alice"
       min_age = 18
-      assert {" select id, $1::int2 as threshold from users where name = $2::text", [<<0, 0, 0, 2, 0, 18>>, "\0\0\0\x05alice"]} == SQL.to_sql(~SQL[WHERE name = {{name}}::text SELECT id, {{min_age}}::int2 AS threshold FROM users])
+      assert {" select id, $1::int2 as threshold from users where name = $2::text", [^min_age, ^name]} = SQL.to_sql(~SQL[WHERE name = {{name}}::text SELECT id, {{min_age}}::int2 AS threshold FROM users])
     end
   end
 

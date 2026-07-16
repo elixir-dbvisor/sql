@@ -38,7 +38,7 @@ defmodule Mix.Tasks.Compile.Sql do
   def do_compile(path) do
     {:ok, context, tokens} = SQL.Lexer.lex(File.read!(path), path)
     {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
-    SQL.__inspect__(tokens, context, {nil, nil, 0, [file: Path.relative_to_cwd(path), line: 1]})
+    SQL.Inspect.to_string(tokens, context, {nil, nil, 0, [file: Path.relative_to_cwd(path), line: 1]})
   end
 
   def files(path \\ File.cwd!) do

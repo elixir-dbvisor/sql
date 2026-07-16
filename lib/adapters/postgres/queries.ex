@@ -14,6 +14,9 @@ defmodule SQL.Adapters.Postgres.Queries do
   end
 
   defp columns(pool) do
+    # ~SQL"select * from information_schema.columns where table_schema not in ('information_schema', 'pg_catalog')"
+    # ~SQL"select * from information_schema.columns where table_schema not in ('mysql', 'performance_schema', 'sys')"
+    # ~SQL"select * from sqlite_master join pragma_table_info (sqlite_master.name)"
     ~SQL"""
     SELECT
         table_schema::text,
@@ -156,34 +159,6 @@ defmodule SQL.Adapters.Postgres.Queries do
       end
     end)
     |> SQL.parse([], SQL.Adapters.Postgres, 0, pool)
-    |> Enum.to_list()
-  end
-
-
-
-  def lock(pool) do
-    # ~SQL"select * from information_schema.columns where table_schema not in ('information_schema', 'pg_catalog')"
-    # ~SQL"select * from information_schema.columns where table_schema not in ('mysql', 'performance_schema', 'sys')"
-    # ~SQL"select * from sqlite_master join pragma_table_info (sqlite_master.name)"
-    ~SQL"""
-    SELECT
-        table_schema::text,
-        table_name::text,
-        column_name::text,
-        data_type::text,
-        is_nullable = 'YES',
-        COALESCE(character_maximum_length, 0)::int4,
-        COALESCE(numeric_precision, 0)::int4,
-        COALESCE(numeric_scale, 0)::int4,
-        COALESCE(datetime_precision, 0)::int4,
-        udt_name::text,
-        is_identity = 'YES',
-        ordinal_position::int4
-    FROM information_schema.columns
-    ORDER BY table_schema, table_name, ordinal_position
-    """
-    |> SQL.map(&Map.new/1)
-    |> struct(pool: pool)
     |> Enum.to_list()
   end
 

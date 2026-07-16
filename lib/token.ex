@@ -13,16 +13,18 @@ defmodule SQL.Token do
       @compile {:inline, to_iodata: 4, __to_iodata__: 4, indention: 3, indention: 4, keyword: 2}
 
       @doc false
-      def static(tokens, context, t, types, params, id, max_rows) do
-        static(tokens, t, types, params, context.binding, id, max_rows, IO.iodata_to_binary(to_iodata(tokens, context)))
+      def static(sql, tokens, context, t, types, params) do
+        static(sql, tokens, t, types, params, context.binding, IO.iodata_to_binary(to_iodata(tokens, context)))
       end
 
-      defp static(_tokens, _t, _types, _params, _count, _id, _max_rows, string) do
-        {string, nil, [], []}
+      defp static(sql, _tokens, t, _types, params, 0, string) do
+        Macro.escape(%{sql | types: t, params: params, string: string})
       end
-
-      def dynamic(_types, _params, _count, acc) do
-        acc
+      defp static(sql, _tokens, t, _types, params, _count, string) do
+        sql = Macro.escape(%{sql | types: t, string: string})
+        quote do
+          %{unquote(sql) | params: unquote(params)}
+        end
       end
 
       @doc false
@@ -146,7 +148,7 @@ defmodule SQL.Token do
         acc
       end
 
-      defoverridable to_iodata: 4, static: 8, dynamic: 4
+      defoverridable to_iodata: 4, static: 7
     end
   end
 end
