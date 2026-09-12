@@ -51,11 +51,11 @@ defmodule Mix.Tasks.Compile.Sql do
     :dets.traverse(:sql, fn
       {module, t, mod, loc} ->
         path = Path.join(path, "#{module}.beam")
-        case File.exists?(path) do
-          true -> :continue
-          false ->
+        case {File.exists?(path), :code.which(module)} do
+          {false, :non_existing} ->
             {:module, ^module, binary, _term} = Module.create(module, mod.build_decoder(t), loc)
             File.write!(path, binary)
+          _ -> :continue
         end
         _ -> :continue
     end)

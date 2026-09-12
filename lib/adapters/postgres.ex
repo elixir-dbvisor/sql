@@ -56,65 +56,80 @@ defmodule SQL.Adapters.Postgres do
     loop(state)
   end
 
-  defp startup(%{username: username, database: database, sockets: sockets, handle: handle} = state) do
-     {:ok, socket} = :socket.open(state.domain, state.type, state.protocol, Map.take(state, [:netns, :use_registry, :debug]))
-     for {level, opts} <- Map.take(state, [:tcp, :udp, :sctp, :ip, :ipv6, :otp, :socket]), {k, v} <- opts, do: :socket.setopt(socket, level, k, v)
-     :ets.insert(sockets, {state.scheduler_id, socket, self()})
+  defp ssl(opts), do: Keyword.merge([verify: :verify_peer, customize_hostname_check: [match_fun: :public_key.pkix_verify_hostname_match_fun(:https)]], opts)
+
+  defp startup(%{username: username, database: database} = state) do
+    ref = make_ref()
+    {:ok, {_, sock}=socket} = :socket.open(state.domain, state.type, state.protocol, Map.take(state, [:netns, :use_registry, :debug]))
+    for {level, opts} <- Map.take(state, [:tcp, :udp, :sctp, :ip, :ipv6, :otp, :socket]), {k, v} <- opts, do: :socket.setopt(socket, level, k, v)
+    :atomic_term.put(state.sockets, state.scheduler_id, sock)
+    :atomic_term.put(state.prepared, state.scheduler_id, :bitset.new(8192))
     :socket.monitor(socket)
-    {:select, {:select_info, :connect, ^handle}} = :socket.connect(socket, Map.take(state, [:family, :port, :addr]), handle)
+    {:select, {:select_info, :connect, ^ref}} = :socket.connect(socket, Map.take(state, [:family, :port, :addr]), ref)
     receive do
-      {:"$socket", ^socket, :select, ^handle} ->
+      {:"$socket", ^socket, :select, ^ref} ->
         :ok = :socket.connect(socket)
         case state do
           %{ssl: false} ->
             send_data(socket, startup_msg(username, database))
-          _ ->
+            startup(%{state | sock: socket}, socket, <<>>, [])
+          %{ssl: true} ->
             send_data(socket, @ssl)
+            startup(%{state | sock: socket, ssl: ssl([cacerts: :public_key.cacerts_get()])}, socket, <<>>, [])
+          %{ssl: [_|_]=ssl} ->
+            send_data(socket, @ssl)
+            startup(%{state | sock: socket, ssl: ssl(ssl)}, socket, <<>>, [])
         end
-        startup(%{state | sock: socket}, <<>>, [])
     end
   end
 
-  defp startup(state, <<buffer::binary-size(0)>>, params) do
-    case :socket.recv(state.sock, 0, [], state.handle) do
-      {:ok, <<data::binary>>} -> startup(state, data, params)
-      {:select, {_, <<data::binary>>}} -> startup(state, data, params)
-      {:select_read, {_, <<data::binary>>}} -> startup(state, data, params)
+  defp startup(state, {:"$socket", _}=socket, <<buffer::binary-size(0)>>, params) do
+    ref = make_ref()
+    case :socket.recv(socket, 0, [], ref) do
+      {:ok, <<data::binary>>} -> startup(state, socket, data, params)
+      {:select, {_, <<data::binary>>}} -> startup(state, socket, data, params)
+      {:select_read, {_, <<data::binary>>}} -> startup(state, socket, data, params)
       {:error, :closed} -> exit(:normal)
       {:select, _} ->
         receive do
-          {:"$socket", _socket, :select, _handle} ->
-            startup(state, buffer, params)
+          {:"$socket", ^socket, :select, ^ref} ->
+            startup(state, socket, buffer, params)
         end
     end
   end
-  defp startup(state, <<?E, len::32, data::binary-size(len-4), rest::binary>>, params) do
+  defp startup(state, {:sslsocket, _, _, _, _, _, _, _}=socket, <<_buffer::binary-size(0)>>, params) do
+    case :ssl.recv(socket, 0) do
+      {:ok, <<data::binary>>} -> startup(state, socket, data, params)
+      {:error, :closed} -> exit(:normal)
+    end
+  end
+  defp startup(state, socket, <<?E, len::32, data::binary-size(len-4), rest::binary>>, params) do
     IO.puts(error(data)[:message])
-    startup(state, rest, params)
+    startup(state, socket, rest, params)
   end
-  defp startup(state, <<?K, _::32, pid::32, secret::32, rest::binary>>, params) do
-    startup(%{state | pid: pid, secret: secret}, rest, params)
+  defp startup(state, socket, <<?K, _::32, pid::32, secret::32, rest::binary>>, params) do
+    startup(%{state | pid: pid, secret: secret}, socket, rest, params)
   end
-  defp startup(%{sock: {:"$socket", _}=socket, ssl: ssl}=state, <<?S, rest::binary>>, params) when is_list(ssl) do
-    {:ok, socket} = :ssl.connect(socket, state.ssl, state.timeout)
-    :ssl.setopts(socket, active: :once)
+  defp startup(%{ssl: ssl}=state, {:"$socket", ref}=socket, <<?S, rest::binary>>, params) when is_list(ssl) do
+    {:ok, socket} = :ssl.connect(socket, state.ssl)
+    :persistent_term.put(ref, socket)
     send_data(socket, <<25+byte_size(state.username)+byte_size(state.database)::32, 196_608::32, "user", 0, state.username::binary, 0, "database", 0, state.database::binary, 0, 0>>)
-    startup(%{state | sock: socket}, rest, params)
+    startup(%{state | sock: socket}, socket, rest, params)
   end
-  defp startup(%{sock: {:"$socket", _}, ssl: ssl}, <<?N, _rest::binary>>, _params) when is_list(ssl) do
+  defp startup(%{ssl: ssl}, {:"$socket", _}, <<?N, _rest::binary>>, _params) when is_list(ssl) do
     raise "SSL not supported by server"
   end
-  defp startup(state, <<?R, len::32, 10::32, payload::binary-size(len-8), rest::binary>>, params) do
+  defp startup(state, socket, <<?R, len::32, 10::32, payload::binary-size(len-8), rest::binary>>, params) do
     mechanisms = :binary.split(payload, <<0>>, [:global])
     if "SCRAM-SHA-256" in mechanisms do
       scram_nonce = Base.encode64(:crypto.strong_rand_bytes(18))
-      send_data(state.sock, <<?p,54::32,"SCRAM-SHA-256",0,32::32,?n,?,,?,,?n,?=,?,,?r,?=,scram_nonce::binary>>)
-      startup(Map.put(state, :scram_nonce, scram_nonce), rest, params)
+      send_data(socket, <<?p,54::32,"SCRAM-SHA-256",0,32::32,?n,?,,?,,?n,?=,?,,?r,?=,scram_nonce::binary>>)
+      startup(Map.put(state, :scram_nonce, scram_nonce), socket, rest, params)
     else
       raise "Unsupported SASL mechanism: #{inspect(mechanisms)}"
     end
   end
-  defp startup(state, <<?R, len::32, 11::32, payload::binary-size(len-8), rest::binary>>, params) do
+  defp startup(state, socket, <<?R, len::32, 11::32, payload::binary-size(len-8), rest::binary>>, params) do
     %{?r => r, ?s => s, ?i => i} = for kv <- :binary.split(payload, ",", [:global]), into: %{} do
       <<k, "=", v::binary>> = kv
       {k, v}
@@ -126,10 +141,10 @@ defmodule SQL.Adapters.Postgres do
     auth_message = <<?n,?=,?,,?r,?=,binary_part(r, 0, 24)::binary,?,,?r,?=,r::binary,?,,?s,?=,s::binary,?,,?i,?=,i::binary,?,,?c,?=,?b,?i,?w,?s,?,,?r,?=,r::binary>>
     client_signature = :crypto.mac(:hmac, :sha256, :crypto.hash(:sha256, client_key), auth_message)
     proof = Base.encode64(:crypto.exor(client_key, client_signature))
-    send_data(state.sock,  <<?p,byte_size(r)+byte_size(proof)+16::32,?c,?=,?b,?i,?w,?s,?,,?r,?=,r::binary,?,,?p,?=,proof::binary>>)
-    startup(Map.put(Map.put(state, :scram_salted_password, salted_password), :scram_auth_message, auth_message), rest, params)
+    send_data(socket, <<?p,byte_size(r)+byte_size(proof)+16::32,?c,?=,?b,?i,?w,?s,?,,?r,?=,r::binary,?,,?p,?=,proof::binary>>)
+    startup(Map.put(Map.put(state, :scram_salted_password, salted_password), :scram_auth_message, auth_message), socket, rest, params)
   end
-  defp startup(state, <<?R, len::32-big, 12::32-big, payload::binary-size(len-8), rest::binary>>, params) do
+  defp startup(state, socket, <<?R, len::32-big, 12::32-big, payload::binary-size(len-8), rest::binary>>, params) do
     %{?v => server_signature_b64} = for kv <- :binary.split(payload, ",", [:global]), into: %{} do
                                     <<k, "=", v::binary>> = kv
                                     {k, v}
@@ -139,31 +154,30 @@ defmodule SQL.Adapters.Postgres do
     if server_signature_b64 != expected_sig do
       raise "SCRAM server signature mismatch"
     end
-    startup(state, rest, params)
+    startup(state, socket, rest, params)
   end
-  defp startup(state, <<?R, len::32, 5::32, salt::binary-size(len-8), rest::binary>>, params) do
+  defp startup(state, socket, <<?R, len::32, 5::32, salt::binary-size(len-8), rest::binary>>, params) do
     password = "md5#{Base.encode16(:crypto.hash(:md5, [Base.encode16(:crypto.hash(:md5, [state.password, state.username]), case: :lower), salt]), case: :lower)}"
-    send_data(state.sock, <<?p, 5+byte_size(password)::32, password::binary, 0>>)
-    startup(state, rest, params)
+    send_data(socket, <<?p, 5+byte_size(password)::32, password::binary, 0>>)
+    startup(state, socket, rest, params)
   end
-  defp startup(state, <<?R, 4::32, 3::32, rest::binary>>, params) do
-    send_data(state.sock, <<?p, 5+byte_size(state.password)::32, state.password::binary, 0>>)
-    startup(state, rest, params)
+  defp startup(state, socket, <<?R, 4::32, 3::32, rest::binary>>, params) do
+    send_data(socket, <<?p, 5+byte_size(state.password)::32, state.password::binary, 0>>)
+    startup(state, socket, rest, params)
   end
-  defp startup(state, <<?S, len::32, data::binary-size(len-4), rest::binary>>, params) do
-    startup(state, rest, [List.to_tuple(split(data, "", []))|params])
+  defp startup(state, socket, <<?S, len::32, data::binary-size(len-4), rest::binary>>, params) do
+    startup(state, socket, rest, [List.to_tuple(split(data, "", []))|params])
   end
-  defp startup(state, <<?1, len::32, _::binary-size(len-4), ?Z, _::32, ?I>>, params) do
-    state = %{state | parameter: params}
-    SQL.Pool.dequeue(state.metrics, state.queue, state.state, state.scheduler_id)
+  defp startup(%{queue: queue, scheduler_id: scheduler_id}=state, _socket, <<?1, len::32, _::binary-size(len-4), ?Z, _::32, ?I>>, params) do
+    :ok = SQL.Pool.register_connection(queue, scheduler_id, self())
+    loop(%{state | parameter: params})
+  end
+  defp startup(%{queue: queue, scheduler_id: scheduler_id}=state, _socket, <<?Z, _::32, ?I>>, _params) do
+    :ok = SQL.Pool.register_connection(queue, scheduler_id, self())
     loop(state)
   end
-  defp startup(state, <<?Z, _::32, ?I>>, _params) do
-    SQL.Pool.dequeue(state.metrics, state.queue, state.state, state.scheduler_id)
-    loop(state)
-  end
-  defp startup(state, <<_tag, len::32, _::binary-size(len-4), rest::binary>>, params) do
-    startup(state, rest, params)
+  defp startup(state, socket, <<_tag, len::32, _::binary-size(len-4), rest::binary>>, params) do
+    startup(state, socket, rest, params)
   end
 
   defp startup_msg(username, database), do: <<25+byte_size(username)+byte_size(database)::32, 196_608::32, "user", 0, username::binary, 0, "database", 0, database::binary, 0, 0>>
@@ -175,18 +189,24 @@ defmodule SQL.Adapters.Postgres do
   end
 
   defp handle_info(:cancel, state), do: cancel(state)
-  defp handle_info({:EXIT, _, _reason}, state) do
-    :socket.close(state.sock)
+  defp handle_info({:EXIT, _, _reason}, %{sock: {:sslsocket, _, _, _, _, _, _, _}=sock}) do
+    :ssl.close(sock)
     :ok
   end
+  defp handle_info({:EXIT, _, _reason}, %{sock: sock}) do
+    :socket.close(sock)
+    :ok
+  end
+  defp handle_info({:ssl_error, sock, {:tls_alert, {:unexpected_message, msg}}}, %{sock: sock}) do
+    raise "#{msg}"
+  end
 
-  def prepare_execute(socket, conn, %SQL{id: id, msg: {_parse, pbe, be, _execute, _close}}=sql, prepared) do
+  def prepare_execute(socket, conn, %SQL{id: id, msg: {pbe, be, _execute, _close}}=sql, prepared) do
     timestamp = :erlang.monotonic_time(:millisecond)
     ref = Process.send_after(conn, :cancel, sql.db_timeout)
-    key = {:erlang.phash2({id, conn}), 1}
-    msg = if :ets.select_count(prepared, [{key, [], [true]}]) == 1, do: be, else: pbe
+    msg = if :bitset.is_prepared(prepared, id), do: be, else: pbe
     send_data(socket, msg, sql)
-    result = drain(socket, conn, sql, make_ref(), key, prepared)
+    result = drain(socket, conn, sql, make_ref(), id, prepared)
     Process.cancel_timer(ref)
     {:ok, result, :erlang.monotonic_time(:millisecond)-timestamp}
   end
@@ -212,6 +232,12 @@ defmodule SQL.Adapters.Postgres do
   defp split("", "", acc), do: acc
   defp split("", v, acc), do: [v|acc]
 
+  defp drain({:sslsocket, _, _, _, _, _, _, _}=socket, _conn, sql, ref, key, prepared) do
+    case :ssl.recv(socket, 0) do
+      {:ok, <<data::binary>>} -> process(data, socket, sql, [], ref, key, prepared)
+      {:error, :closed} -> exit(:normal)
+    end
+  end
   defp drain(socket, conn, sql, ref, key, prepared) do
     case :socket.recv(socket, 0, [], ref) do
       {:error, :closed} ->
@@ -229,6 +255,12 @@ defmodule SQL.Adapters.Postgres do
     end
   end
 
+  defp more(buffer, {:sslsocket, _, _, _, _, _, _, _}=socket, sql, rows, ref, key, prepared) do
+    case :ssl.recv(socket, 0) do
+      {:ok, data} -> process(IO.iodata_to_binary([buffer, data]), socket, sql, rows, ref, key, prepared)
+      {:error, :closed} -> exit(:normal)
+    end
+  end
   defp more(buffer, socket, sql, rows, ref, key, prepared) do
     case :socket.recv(socket, 0, [], ref) do
       {:ok, data} -> process(IO.iodata_to_binary([buffer, data]), socket, sql, rows, ref, key, prepared)
@@ -283,7 +315,7 @@ defmodule SQL.Adapters.Postgres do
       <<50, 4::32, rest::binary>> ->
         process(rest, socket, sql,  rows, ref, key, prepared)
       <<49, 4::32, rest::binary>> ->
-        :ets.insert(prepared, key)
+        :bitset.mark_prepared(prepared, key)
         process(rest, socket, sql,  rows, ref, key, prepared)
       <<rest::binary>>->
         more([rest], socket, sql, rows, ref, key, prepared)
@@ -331,7 +363,7 @@ defmodule SQL.Adapters.Postgres do
     count = length(t)
     acc = <<bind::binary, count::16-big, formats(count)::binary>>
     be = <<?B,byte_size(acc)+4::32-big, acc::binary, execute::binary>>
-    Macro.escape(%{sql | decoder: SQL.Adapters.Postgres.decoder(t), string: string, params: params, msg: {parse, parse<>be, be, execute, <<?C,len::32,?P,portal::binary,0,?S,4::32-big>>}})
+    Macro.escape(%{sql | decoder: SQL.Adapters.Postgres.decoder(t), string: string, params: params, msg: {parse<>be, be, execute, <<?C,len::32,?P,portal::binary,0,?S,4::32-big>>}})
   end
 
   defp static(%{id: id, max_rows: max_rows} = sql, _tokens, t, types, params, count, string) do
@@ -355,15 +387,13 @@ defmodule SQL.Adapters.Postgres do
     quote do
       acc = <<unquote(bind)::binary, unquote_splicing(p), unquote(count)::16-big, unquote(format)::binary>>
       be = <<?B,byte_size(acc)+4::32-big, acc::binary, unquote(execute)::binary>>
-      %{unquote(Macro.escape(sql)) | params: unquote(Enum.reverse(params)), msg: {unquote(parse), unquote(parse)<>be, be, unquote(execute), unquote(close)}}
+      %{unquote(Macro.escape(sql)) | params: unquote(Enum.reverse(params)), msg: {unquote(parse)<>be, be, unquote(execute), unquote(close)}}
     end
   end
 
   def encoder([], [], []), do: [<<>>]
   def encoder([], [], acc), do: acc
   def encoder([t|types], [p|params], acc), do: encoder(types, params, [encode(t, p)|acc])
-
-
 
   def decoder([]), do: nil
   def decoder(t) do

@@ -5,28 +5,27 @@ jobs:
   test:
     runs-on: ubuntu-22.04
     name: OTP 28 / Elixir 1.19
-    services:
-      postgres:
-        image: postgres:latest
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: sql_test
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports: ["5432:5432"]
-        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
     steps:
       - name: Checkout ${{github.repository}}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Checkout sqltest
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
             path: sqltest
             repository: elliotchance/sqltest
+      - name: Install PostgreSQL Binaries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql postgresql-contrib
+          sudo systemctl stop postgresql
+          sudo chown -R $USER:$USER /var/run/postgresql
+          PG_BINDIR=$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -n 1)
+          echo "$PG_BINDIR" >> $GITHUB_PATH
       - uses: erlef/setup-beam@v1
         with:
           otp-version: 28
           elixir-version: 1.19
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             deps

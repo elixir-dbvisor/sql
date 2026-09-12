@@ -30,13 +30,13 @@ defmodule Mix.Tasks.Sql.Create do
       {:ok, [0]} ->
         try do
           [] = mod.create_database(state)
-          if !opts[:quit], do: Mix.shell().info("The database for #{name} has been created")
+          if !opts[:quiet], do: Mix.shell().info("The database for #{name} has been created")
         catch
           e ->
           Mix.raise("The database for #{name} couldn't be created: #{e.message}")
         end
       {:ok, [1]} ->
-        if !opts[:quit], do: Mix.shell().info("The database for #{name} has already been created")
+        if !opts[:quiet], do: Mix.shell().info("The database for #{name} has already been created")
     end
   end
 end

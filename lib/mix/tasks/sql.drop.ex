@@ -30,13 +30,13 @@ defmodule Mix.Tasks.Sql.Drop do
       {:ok, [1]} ->
         try do
           [] = mod.drop_database(state)
-          if !opts[:quit], do: Mix.shell().info("The database for #{name} has been dropped")
+          if !opts[:quiet], do: Mix.shell().info("The database for #{name} has been dropped")
         catch
           e ->
             Mix.raise("The database for #{name} couldn't be dropped: #{e.message}")
         end
       {:ok, [0]} ->
-        if !opts[:quit], do: Mix.shell().info("The database for #{name} has already been dropped")
+        if !opts[:quiet], do: Mix.shell().info("The database for #{name} has already been dropped")
     end
   end
 end

@@ -9,15 +9,21 @@ defmodule SQL do
   @moduledoc since: "0.1.0"
   alias SQL.Adapters.ANSI
 
+  @pool :default
+  @queue_timeout 50
+  @db_timeout 15000
+  @adapter ANSI
+
   defmacro __using__(opts) do
     quote do
       opts = unquote(opts)
       if Mix.Project.get() != SQL.MixProject, do: Application.ensure_all_started(:sql, :permanent)
       @doc false
       import SQL
-      pool = opts[:pool] || :default
+      pool = opts[:pool] || unquote(@pool)
       config = Keyword.get(Application.compile_env(:sql, :pools, []), pool)
-      adapter = opts[:adapter] || config[:adapter] || ANSI
+      adapter = opts[:adapter] || config[:adapter] || unquote(@adapter)
+      queue_timeout = opts[:queue_timeout] || config[:queue_timeout] || unquote(@queue_timeout)
       config = Map.new(Keyword.merge([case: :lower, columns: [], adapter: adapter, validate: fn _, _ -> true end],  opts))
       path = Path.relative_to_cwd("sql.lock")
       @external_resource path
@@ -31,10 +37,11 @@ defmodule SQL do
       Module.put_attribute(__MODULE__, :sql_config, config)
       Module.put_attribute(__MODULE__, :sql_adapter, adapter)
       Module.put_attribute(__MODULE__, :sql_pool, pool)
+      Module.put_attribute(__MODULE__, :sql_queue_timeout, queue_timeout)
     end
   end
 
-  defstruct [tokens: [], params: [], vars: [], columns: [], types: nil, decoder: nil, adapter: nil, module: nil, id: nil, string: nil, inspect: nil, fn: nil, context: nil, pool: :default, db_timeout: 15000, msg: nil, max_rows: 0, acc: nil, queue_timeout: 250]
+  defstruct [tokens: [], params: [], vars: [], columns: [], types: nil, decoder: nil, adapter: nil, module: nil, id: nil, string: nil, inspect: nil, fn: nil, context: nil, pool: @pool, db_timeout: @db_timeout, msg: nil, max_rows: 0, acc: nil, queue_timeout: @queue_timeout]
 
   defimpl String.Chars, for: SQL do
     def to_string(sql), do: sql.string
@@ -96,55 +103,49 @@ defmodule SQL do
       iex(1)> SQL.transaction, do: Enum.list(~SQL"from users select id, email")
   """
   @doc since: "0.5.0"
-  defmacro transaction(do: block) do
-    key = __CALLER__.function
-    pool = Module.get_attribute(__CALLER__.module, :sql_pool, :default)
-    timeout = Module.get_attribute(__CALLER__.module, :sql_queue_timeout, 250)
-    adapter = Module.get_attribute(__CALLER__.module, :sql_adapter, ANSI)
+  defmacro transaction(opts \\ [], do: block) do
+    pool = opts[:pool] || Module.get_attribute(__CALLER__.module, :sql_pool, @pool)
+    timeout = opts[:timeout] || Module.get_attribute(__CALLER__.module, :sql_queue_timeout, @queue_timeout)
+    adapter = opts[:adapter] || Module.get_attribute(__CALLER__.module, :sql_adapter, @adapter)
+    id = :erlang.phash2(block)
+    savepoint = parse("savepoint sp_#{id}", [adapter: adapter, pool: pool])
+    release = parse("release savepoint sp_#{id}", [adapter: adapter, pool: pool])
+    rollback = parse("rollback to savepoint sp_#{id}", [adapter: adapter, pool: pool])
     quote generated: true do
-      caller = self()
-      ref = make_ref()
-      case :persistent_term.get(unquote(key), SQL.transaction()) do
+      case SQL.transaction() do
         nil ->
-          {metrics, sockets, state, queue, _prepared} = :persistent_term.get(unquote(pool))
-          case SQL.Pool.checkout(metrics, queue, state, unquote(timeout)) do
+          case SQL.Pool.checkout(unquote(pool), unquote(timeout)) do
             {:error, :timeout} = error -> error
-            {slot, monitor} ->
-              [{^slot, socket, conn}] = :ets.lookup(sockets, slot)
-              Process.put(SQL.Transaction, {caller, socket, conn})
-              Enum.to_list(~SQL[begin])
-              try do
+            {:ok, conn, socket, prepared, slot} ->
+              Process.put(SQL.Transaction, {conn, socket, prepared})
+              Stream.run(%{~SQL[begin] | pool: unquote(pool)})
+              result = try do
                 result = unquote(block)
-                Enum.to_list(~SQL[commit])
-                Process.delete(SQL.Transaction)
-                send monitor, :release
-                SQL.Pool.dequeue(metrics, queue, state, slot)
+                Stream.run(%{~SQL[commit] | pool: unquote(pool)})
                 case result do
                   {status, _} when status in ~w[error ok]a -> result
                   result -> {:ok, result}
                 end
               rescue
                 e ->
-                  Enum.to_list(~SQL[rollback])
-                  Process.delete(SQL.Transaction)
-                  send monitor, :release
-                  SQL.Pool.dequeue(metrics, queue, state, slot)
+                  Stream.run(%{~SQL[rollback] | pool: unquote(pool)})
                   {:error, e}
               end
+              SQL.Pool.checkin(unquote(pool), slot)
+              result
           end
         _ ->
-          id = "sp_#{:erlang.unique_integer([:positive])}"
-          Enum.to_list(parse("savepoint #{id}", [], unquote(adapter), 0, unquote(pool)))
+          Stream.run(unquote(Macro.escape(savepoint)))
           try do
             result = unquote(block)
-            Enum.to_list(parse("release savepoint #{id}", [], unquote(adapter), 0, unquote(pool)))
+            Stream.run(unquote(Macro.escape(release)))
             case result do
               {status, _} when status in ~w[error ok]a -> result
               result -> {:ok, result}
             end
           rescue
             e ->
-            Enum.to_list(parse("rollback to savepoint #{id}", [], unquote(adapter), 0, unquote(pool)))
+            Stream.run(unquote(Macro.escape(rollback)))
             {:error, e}
           end
       end
@@ -153,53 +154,51 @@ defmodule SQL do
 
   @doc false
   @doc since: "0.5.0"
-  defmacro begin(key \\ __CALLER__.function, pool \\ Module.get_attribute(__CALLER__.module, :sql_pool), adapter \\ Module.get_attribute(__CALLER__.module, :sql_adapter), timeout \\ Module.get_attribute(__CALLER__.module, :sql_queue_timeout, 250)) do
-    quote do
-      {metrics, sockets, state, queue, _prepared} = :persistent_term.get(unquote(pool))
-      case SQL.Pool.checkout(metrics, queue, state, unquote(timeout)) do
+  defmacro begin() do
+    pool = Module.get_attribute(__CALLER__.module, :sql_pool, @pool)
+    timeout = Module.get_attribute(__CALLER__.module, :sql_queue_timeout, @queue_timeout)
+    quote generated: true do
+      binding = binding()
+      key = binding[:tags][:test] || unquote(__CALLER__.function)
+      pool = binding[:pool] || unquote(pool)
+      case SQL.Pool.checkout(pool, unquote(timeout)) do
         {:error, :timeout} -> raise RuntimeError, "timeout"
-        {slot, monitor} ->
-          owner = self()
-          [{^slot, socket, conn}] = :ets.lookup(sockets, slot)
-          :persistent_term.put(unquote(key), {owner, slot, monitor, socket, conn})
-          Process.put(SQL.Transaction, {owner, socket, conn})
-          :persistent_term.put({SQL.Conn, owner}, {owner, socket, conn})
-          Enum.to_list(SQL.parse("begin", [], unquote(adapter), 0, unquote(pool)))
+        {:ok, conn, socket, prepared, slot} ->
+          :persistent_term.put(key, {conn, socket, prepared, slot})
+          Process.put(SQL.Transaction, {conn, socket, prepared})
+          :persistent_term.put({SQL.Conn, self()}, {conn, socket, prepared})
+          Stream.run(%{~SQL[begin] | pool: pool})
       end
     end
   end
 
   @doc false
   @doc since: "0.5.0"
-  defmacro rollback(key \\ __CALLER__.function, pool \\ Module.get_attribute(__CALLER__.module, :sql_pool), adapter \\ Module.get_attribute(__CALLER__.module, :sql_adapter)) do
-    quote do
-      {metrics, sockets, state, queue, _prepared} = :persistent_term.get(unquote(pool))
-      {owner, slot, monitor, socket, conn} = :persistent_term.get(unquote(key))
-      Process.put(SQL.Transaction, {owner, socket, conn})
-      Enum.to_list(SQL.parse("rollback", [], unquote(adapter), 0, unquote(pool)))
-      :persistent_term.erase({SQL.Conn, owner})
-      :persistent_term.erase(unquote(key))
-      Process.delete(SQL.Transaction)
-      send monitor, :release
-      SQL.Pool.dequeue(metrics, queue, state, slot)
-      :ok
+  defmacro rollback() do
+    pool = Module.get_attribute(__CALLER__.module, :sql_pool, @pool)
+    quote generated: true do
+      binding = binding()
+      key = binding[:tags][:test] || unquote(__CALLER__.function)
+      pool = binding[:pool] || unquote(pool)
+      {conn, socket, prepared, slot} = :persistent_term.get(key)
+      Process.put(SQL.Transaction, {conn, socket, prepared})
+      Stream.run(%{~SQL[rollback] | pool: pool})
+      SQL.Pool.checkin(pool, slot)
     end
   end
 
   @doc false
   @doc since: "0.5.0"
-  defmacro commit(key \\ __CALLER__.function, pool \\ Module.get_attribute(__CALLER__.module, :sql_pool), adapter \\ Module.get_attribute(__CALLER__.module, :sql_adapter)) do
-    quote do
-      {metrics, sockets, state, queue, _prepared} = :persistent_term.get(unquote(pool))
-      {owner, slot, monitor, socket, conn} = :persistent_term.get(unquote(key))
-      Process.put(SQL.Transaction, {owner, socket, conn})
-      Enum.to_list(SQL.parse("commit", [], unquote(adapter), 0, unquote(pool)))
-      :persistent_term.erase({SQL.Conn, owner})
-      :persistent_term.erase(unquote(key))
-      Process.delete(SQL.Transaction)
-      send monitor, :release
-      SQL.Pool.dequeue(metrics, queue, state, slot)
-      :ok
+  defmacro commit() do
+    pool = Module.get_attribute(__CALLER__.module, :sql_pool, @pool)
+    quote generated: true do
+      binding = binding()
+      key = binding[:tags][:test] || unquote(__CALLER__.function)
+      pool = binding[:pool] || unquote(pool)
+      {conn, socket, prepared, slot} = :persistent_term.get(key)
+      Process.put(SQL.Transaction, {conn, socket, prepared})
+      Stream.run(%{~SQL[commit] | pool: pool})
+      SQL.Pool.checkin(pool, slot)
     end
   end
 
@@ -219,21 +218,33 @@ defmodule SQL do
 
   @doc false
   @doc since: "0.1.0"
-  def parse(binary, binding \\ [], adapter \\ ANSI, max_rows \\ 0, pool \\ :default, fun \\ nil) do
-    {:ok, context, tokens} = SQL.Lexer.lex(binary)
-    {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
-    {:ok, t, c, types, params} = SQL.Parser.describe(tokens, [])
-
-    SQL
-    |> struct(id: :erlang.phash2({adapter, binary}), columns: c, types: t, adapter: adapter, fn: fun, pool: pool, tokens: tokens, context: context, max_rows: max_rows)
-    |> adapter.static(tokens, %{context | module: adapter}, t, types, params)
-    |> Code.eval_quoted_with_env(binding, Code.env_for_eval(__ENV__))
+  def parse(binary, opts \\ []) do
+    adapter = Keyword.get(opts, :adapter, @adapter)
+    pool = Keyword.get(opts, :pool, @pool)
+    id = id(binary, adapter)
+    key = {id, :parse}
+    case :persistent_term.get(key, nil) do
+      nil ->
+        {:ok, context, tokens} = SQL.Lexer.lex(binary)
+        context = %{context | module: adapter}
+        {:ok, context, tokens} = SQL.Parser.parse(tokens, context)
+        {:ok, t, c, types, params} = SQL.Parser.describe(tokens, [])
+        result = SQL
+                 |> struct(id: id, columns: c, types: t, adapter: adapter, fn: Keyword.get(opts, :fn), pool: Keyword.get(opts, :pool, @pool), tokens: tokens, context: context)
+                 |> adapter.static(tokens, context, t, types, params)
+        :persistent_term.put(key, result)
+        result
+      result ->
+        result
+    end
+    |> Code.eval_quoted_with_env(Keyword.get(opts, :binding, []), Code.env_for_eval(__ENV__))
     |> elem(0)
+    |> struct(pool: pool)
   end
 
   @doc false
   def build(left, {:<<>>, _, _} = right, _modifiers, env) do
-    config = %{case: :lower, adapter: Application.get_env(:sql, :adapter, ANSI), validate: fn _, _ -> true end}
+    config = %{case: :lower, adapter: Application.get_env(:sql, :adapter, @adapter), validate: fn _, _ -> true end}
     config = if env.module, do: Module.get_attribute(env.module, :sql_config, config), else: config
     columns = Map.get(config, :columns, [])
     sql = struct(SQL, module: env.module, adapter: config.adapter)
@@ -331,16 +342,25 @@ defmodule SQL do
   end
 
   @doc false
-  def id(data, mod) do
-    key = {mod, data}
+  def id(data, mod), do: id({mod, data})
+
+  defp id(key) do
+    atomic = case :persistent_term.get(SQL.Counter, nil) do
+           	   nil ->
+                 atomic = :atomics.new(1, [])
+                 :persistent_term.put(SQL.Counter, atomic)
+                 atomic
+               atomic -> atomic
+             end
     case :persistent_term.get(key, nil) do
       nil ->
-        id = :erlang.phash2(key)
+        id = :atomics.add_get(atomic, 1, 1)
         :persistent_term.put(key, id)
         id
       id -> id
     end
   end
+
 
   @doc false
   def reduce(%SQL{msg: nil}, _acc, _fun) do
@@ -351,38 +371,37 @@ defmodule SQL do
   end
   defp do_reduce(sql, acc, fun) do
     # time: System.convert_time_unit(:erlang.monotonic_time(:millisecond)-timestamp, :native, :millisecond)
-    {metrics, sockets, state, queue, prepared} = :persistent_term.get(sql.pool)
     case transaction() do
       nil ->
-        case SQL.Pool.checkout(metrics, queue, state, sql.queue_timeout) do
+        case SQL.Pool.checkout(sql.pool, sql.queue_timeout) do
           {:error, :timeout} -> raise RuntimeError, "timeout"
-          {slot, monitor} ->
-            [{^slot, socket, conn}] = :ets.lookup(sockets, slot)
+          {:ok, conn, socket, prepared, slot} ->
             {:ok, rows, _time} = sql.adapter.prepare_execute(socket, conn, sql, prepared)
-            result = Enumerable.reduce(rows, acc, fun)
-            send monitor, :release
-            SQL.Pool.dequeue(metrics, queue, state, slot)
-            result
+            SQL.Pool.checkin(sql.pool, slot)
+            Enumerable.reduce(rows, acc, fun)
         end
-      {_owner, socket, conn} ->
+      {conn, socket, prepared} ->
         {:ok, rows, _time} = sql.adapter.prepare_execute(socket, conn, sql, prepared)
         Enumerable.reduce(rows, acc, fun)
     end
   end
 
   if Application.compile_env(:sql, :env) == :test do
-    def conn() do
-      {:links, links} = Process.info(self(), :links)
-      {:parent, parent} = Process.info(self(), :parent)
-      [parent|links]
-      |> Kernel.++(Process.get(:"$callers", []))
-      |> Kernel.++(Process.get(:"$ancestors", []))
-      |> Enum.uniq()
-      |> Enum.find_value(&:persistent_term.get({SQL.Conn, &1}, nil))
-    end
     @doc false
     def transaction() do
-      Process.get(SQL.Transaction) || conn()
+      case Process.get(SQL.Transaction) do
+        nil ->
+          {:links, links} = Process.info(self(), :links)
+          {:parent, parent} = Process.info(self(), :parent)
+          [parent|links]
+          |> Kernel.++(Process.get(:"$callers", []))
+          |> Kernel.++(Process.get(:"$ancestors", []))
+          |> Enum.uniq()
+          |> Enum.find_value(&:persistent_term.get({SQL.Conn, &1}, nil))
+
+        transaction ->
+          transaction
+      end
     end
   else
     @doc false

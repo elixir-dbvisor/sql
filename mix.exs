@@ -18,7 +18,11 @@ defmodule SQL.MixProject do
       docs: docs(),
       package: package(),
       elixirc_paths: elixirc_paths(Mix.env()),
-      aliases: [test: ["sql.create --quiet", "test"]]
+      aliases: [
+        compile: ["cmd make", "compile"],
+        clean: ["cmd make clean", "clean"],
+        test: ["test --no-start"]
+      ]
     ]
   end
 

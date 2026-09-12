@@ -29,16 +29,12 @@ defmodule SQL.Pool do
     password: nil,
     hostname: nil,
     database: nil,
-    timezone: nil,
     pid: nil,
     secret: nil,
-    state: nil,
     size: 10,
-    queue: nil,
     sock: nil,
-    handle: nil,
-    metrics: nil,
     sockets: nil,
+    queue: nil
   ]
 
   def start_link(config) do
@@ -48,23 +44,12 @@ defmodule SQL.Pool do
   @impl true
   def init(config) do
     size = config[:size] || :erlang.system_info(:schedulers)
-    opts = [signed: true]
-    metrics = :atomics.new(3, opts)
-    state = :atomics.new(size, opts)
-    opts = [:set, :public,  {:write_concurrency, :auto}, {:read_concurrency, true}, {:decentralized_counters, true}]
-    sockets = :ets.new(:sockets, opts)
-    prepared = :ets.new(:sql, opts)
-    queue = :ets.new(:queue, opts)
-    for n <- 1..size, do: :atomics.put(state,n,1)
-    for n <- 1..3, do: :atomics.put(metrics,n,0)
-    pool = %{struct(__MODULE__, config)| size: size, state: state, metrics: metrics, queue: queue, sockets: sockets, prepared: prepared}
-    :persistent_term.put(pool.name, {metrics, sockets, state, queue, prepared})
+    pool = struct(init(config[:name], size), config)
     children =
       for n <- 1..size do
-        handle = make_ref()
         %{
-          id: handle,
-          start: {pool.adapter, :start, [%{pool | scheduler_id: n, sockets: sockets, handle: handle}]},
+          id: make_ref(),
+          start: {pool.adapter, :start, [%{pool | scheduler_id: n}]},
           restart: :permanent,
           shutdown: 5000,
           type: :worker,
@@ -73,76 +58,66 @@ defmodule SQL.Pool do
     Supervisor.init(children, strategy: :one_for_one)
   end
 
-  @doc false
-  def checkout(stats, queue, state, timeout) do
-    caller = self()
-    a = :erlang.system_info(:scheduler_id)
-    {a, b} = case :atomics.info(state)[:size] do
-              1 -> {1, 1}
-              ^a -> {a, a-1}
-              _ -> {a, a+1}
-            end
-    case :atomics.compare_exchange(state, a, 0, 1) do
-      :ok -> monitor(stats, queue, state, a, caller)
-      1 ->
-        case :atomics.compare_exchange(state, b, 0, 1) do
-          :ok -> monitor(stats, queue, state, b, caller)
-          1 ->
-            idx = :atomics.add_get(stats, 2, 1)
-            :ets.insert(queue, {idx, caller})
+  def init(name, size) do
+    size = size || :erlang.system_info(:schedulers)
+    queue = :atomic_queue.new(1024*4, size)
+    sockets = :atomic_term.new(size)
+    prepared = :atomic_term.new(size)
+    pool = :atomic_term.new(3)
+    :atomic_term.put(pool, 1, queue)
+    :atomic_term.put(pool, 2, sockets)
+    :atomic_term.put(pool, 3, prepared)
+    :persistent_term.put(name, pool)
+    struct(__MODULE__, name: name, size: size, sockets: sockets, queue: queue, prepared: prepared)
+  end
+
+  def register_connection(queue, slot, pid) do
+    :ok = :atomic_queue.register_connection(queue, slot, pid)
+  end
+
+  def checkin(pool, slot) do
+    checkin(pool, :atomic_term.get(:persistent_term.get(pool), 1), slot)
+  end
+
+  defp checkin(pool, queue, slot) do
+    case :atomic_queue.checkin(queue, slot) do
+      :ok ->
+        Process.delete(SQL.Transaction)
+        :ok
+      :busy ->
+        checkin(pool, queue, slot)
+    end
+  end
+
+  def checkout(pool, timeout, caller \\ self()) do
+    pool = :persistent_term.get(pool)
+    checkout(:atomic_term.get(pool, 1), :atomic_term.get(pool, 2), :atomic_term.get(pool, 3), timeout, caller)
+  end
+
+  defp checkout(queue, sockets, prepared, timeout, caller) do
+    case :atomic_queue.checkout(queue, caller, :erlang.system_info(:scheduler_id)) do
+      {:ok, conn, slot} -> {:ok, conn, socket(sockets, slot), :atomic_term.get(prepared, slot), slot}
+      :full -> checkout(queue, sockets, prepared, timeout, caller)
+      idx ->
+        receive do
+          {:ok, conn, slot} -> {:ok, conn, socket(sockets, slot), :atomic_term.get(prepared, slot), slot}
+        after
+          timeout ->
+            :atomic_queue.dequeue(queue, caller, idx)
             receive do
-              {^idx, msg} -> msg
+              {:ok, _conn, slot} ->
+                :atomic_queue.checkin(queue, slot)
+                {:error, :timeout}
             after
-              timeout ->
-                case :ets.lookup(queue, idx) do
-                  [{^idx, ^caller}] ->
-                    :ets.delete(queue, idx)
-                    {:error, :timeout}
-                  [{^idx, _pid}] -> {:error, :timeout}
-                  [] ->
-                    receive do
-                      {^idx, msg} -> msg
-                    end
-                end
+              0 ->
+                {:error, :timeout}
             end
         end
     end
   end
 
-  @doc false
-  def dequeue(stats, queue, state, slot) do
-    if 0 < :atomics.get(stats, 2) do
-      idx = :atomics.add_get(stats, 2, -1)+1
-      case :ets.take(queue, idx) do
-        [{^idx, caller}] ->
-          spawn(fn ->
-            ref = Process.monitor(caller)
-            send caller, {idx, {slot, self()}}
-            receive do
-              :release ->
-                Process.demonitor(ref, [:flush])
-              {:DOWN, ^ref, :process, ^caller, reason} when reason not in ~w[normal shutdown]a ->
-                dequeue(stats, queue, state, slot)
-            end
-            exit(:normal)
-          end)
-        [] -> dequeue(stats, queue, state, slot)
-      end
-    else
-      :ok = :atomics.compare_exchange(state, slot, 1, 0)
-    end
-  end
-
-  defp monitor(stats, queue, state, slot, caller) do
-    {slot, spawn(fn ->
-      ref = Process.monitor(caller)
-      receive do
-        :release ->
-          Process.demonitor(ref, [:flush])
-        {:DOWN, ^ref, :process, ^caller, reason} when reason not in ~w[normal shutdown]a ->
-          dequeue(stats, queue, state, slot)
-      end
-      exit(:normal)
-    end)}
+  defp socket(sockets, slot) do
+    ref = :atomic_term.get(sockets, slot)
+    :persistent_term.get(ref, {:"$socket", ref})
   end
 end

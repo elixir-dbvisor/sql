@@ -92,15 +92,15 @@ defmodule SQL.Integration.PostgresTest do
 
   describe "integration" do
     setup tags do
-      SQL.begin(tags.test)
-      on_exit(fn -> SQL.rollback(tags.test) end)
+      SQL.begin()
+      on_exit(fn -> SQL.rollback() end)
     end
 
     for type <- Types.list() do
       @tag type: type.name
       test "round-trip #{type.name}" do
         value = Types.value(unquote(Macro.escape(type.name)))
-        sql = SQL.parse(unquote("select {{value}}::#{Types.type(type.name)}"), [value: value], SQL.Adapters.Postgres)
+        sql = SQL.parse(unquote("select {{value}}::#{Types.type(type.name)}"), binding: [value: value], adapter: SQL.Adapters.Postgres)
         assert [[value]] == Enum.to_list(sql)
       end
     end
@@ -156,7 +156,7 @@ defmodule SQL.Integration.PostgresTest do
     test "transaction state are propagated" do
       owner = Process.get(SQL.Transaction)
       parent = self()
-      fun = fn -> send(parent, SQL.conn()) end
+      fun = fn -> send(parent, SQL.transaction()) end
       spawn_link(fun)
       assert_receive ^owner
 
@@ -173,8 +173,8 @@ defmodule SQL.Integration.PostgresTest do
   end
 
   test "raise error if socket is closed" do
-    SQL.begin(:error)
-    {_owner, socket, _conn} = Process.get(SQL.Transaction)
+    SQL.begin()
+    {_conn, socket, _ref} = Process.get(SQL.Transaction)
     :socket.shutdown(socket, :read_write)
     assert_raise RuntimeError, ~s{connection closed}, fn ->
       Enum.to_list(~SQL"SELECT 1")
