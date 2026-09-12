@@ -54,7 +54,7 @@ defmodule SQLTest do
   end
 
   test "inspect/1" do
-    assert ~s(\e[0m~SQL\"\"\"\n\e[35mselect\e[0m\n  \e[35m+\e[0m\e[33m1000\e[0m\n\"\"\") == inspect(~SQL[select +1000])
+    assert ~s(\e[0m~SQL\"\"\"\n\e[35mselect\e[0m\n \e[35m+\e[0m\e[33m1000\e[0m\n\"\"\") == inspect(~SQL[select +1000])
   end
 
   test "to_sql/1" do
@@ -397,6 +397,8 @@ defmodule SQLTest do
     test "=" do
       assert "where id = 1" == to_string(~SQL[where id = 1])
       assert "where id=1" == to_string(~SQL[where id=1])
+      assert "select id from t where a = -5" == to_string(~SQL[select id from t where a = -5])
+      assert "select id from t where a = +5" == to_string(~SQL[select id from t where a = +5])
     end
     test "-" do
       assert "where id - 1" == to_string(~SQL[where id - 1])
@@ -421,6 +423,7 @@ defmodule SQLTest do
     test ">" do
       assert "where id > 1" == to_string(~SQL[where id > 1])
       assert "where id>1" == to_string(~SQL[where id>1])
+      assert "select id from t where a > -5" == to_string(~SQL[select id from t where a > -5])
     end
     test "<" do
       assert "where id < 1" == to_string(~SQL[where id < 1])
@@ -470,6 +473,15 @@ defmodule SQLTest do
     end
     test "as" do
       assert "select id as dd" == to_string(~SQL[select id as dd])
+    end
+    test "and" do
+      assert "select id from t where a = 1 and (b > 2)" == to_string(~SQL[select id from t where a = 1 and (b > 2)])
+    end
+    test "or" do
+      assert "select id from t where a = 1 or (b > 2)" == to_string(~SQL[select id from t where a = 1 or (b > 2)])
+    end
+    test "for" do
+      assert "select id from t where a = 1 for update" == to_string(~SQL[select id from t where a = 1 for update])
     end
   end
 end

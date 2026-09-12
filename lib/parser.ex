@@ -178,6 +178,10 @@ defmodule SQL.Parser do
     node = {t,m,__parse__(a)++acc}
     parse(tokens, context, unit, unit, [node|root], acc2, validate(node, context, errors))
   end
+  defp parse([{:update=t2,m2,[]=unit}, {:for=t,m,[]=unit}|tokens], context, a, acc, root, acc2, errors) do
+    node = {t,m,[{t2, m2, __parse__(a)++acc}|unit]}
+    parse(tokens, context, unit, unit, [node|root], acc2, validate(node, context, errors))
+  end
   defp parse([{t,m,[]=unit}|tokens], context, a, acc, root, acc2, errors) when t in ~w[select where group having order limit offset delete update set insert]a do
     node = {t,m,__parse__(a)++acc}
     parse(tokens, context, unit, unit, [node|root], acc2, validate(node, context, errors))
@@ -216,6 +220,10 @@ defmodule SQL.Parser do
       [{tl, _, []}=l, {t=:and, m, []=a}, {tr, _, [_,_]}=r|rest] when tl in ~w[true false null unknown]a and tr in @comparison -> __parse__([{t, m, [l,r|a]}|rest])
       [{tl, _, []}=l, {t=:or, m, []=a}, {tr, _, [_,_]}=r|rest] when tl in ~w[true false null unknown]a and tr in @comparison -> __parse__([{t, m, [l,r|a]}|rest])
 
+      [{tl, _, [_|_]}=l, {t=:and, m, []=a}, {:paren, _, [_|_]}=r|rest] when tl in @comparison   -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, [_|_]}=l, {t=:or, m, []=a}, {:paren, _, [_|_]}=r|rest] when tl in @comparison -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, []}=l, {t=:and, m, []=a}, {:paren, _, [_|_]}=r|rest] when tl in ~w[true false null unknown]a   -> __parse__([{t, m, [l,r|a]}|rest])
+      [{tl, _, []}=l, {t=:or, m, []=a}, {:paren, _, [_|_]}=r|rest] when tl in ~w[true false null unknown]a -> __parse__([{t, m, [l,r|a]}|rest])
 
       [{tl, _, [_,_]}=l, {:and, _, []}=r|rest] when tl in @comparison ->
         __parse__([l,r|__parse__(rest)])
@@ -230,6 +238,9 @@ defmodule SQL.Parser do
       [l, {t=:%, m, []=a}, r|[]=rest] -> __parse__([{t, m, [l,r|a]}|rest])
       [l, {t=:+, m, []=a}, r|[]=rest] -> __parse__([{t, m, [l,r|a]}|rest])
       [l, {t=:-, m, []=a}, r|[]=rest] -> __parse__([{t, m, [l,r|a]}|rest])
+
+      [{t=:+, m, []=a}, r|[]=rest] -> __parse__([{t, m, [r|a]}|rest])
+      [{t=:-, m, []=a}, r|[]=rest] -> __parse__([{t, m, [r|a]}|rest])
 
       [l, {t=:*, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest])
       [l, {t=:/, m, []=a}, r|[{tr, _, _}|_]=rest] when tr in ~w[and or then]a -> __parse__([{t, m, [l,r|a]}|rest])
@@ -351,11 +362,11 @@ defmodule SQL.Parser do
     end
   end
 
-  @order %{insert: 0, delete: 0, update: 0, select: 0, set: 1, from: 1, join: 2, left: 2, right: 2, inner: 2, natural: 2, full: 2, cross: 2, where: 3, group: 4, having: 5, window: 6, order: 7, limit: 8, offset: 9, fetch: 10, returning: 11}
+  @order %{insert: 0, delete: 0, update: 0, select: 0, set: 1, from: 1, join: 2, left: 2, right: 2, inner: 2, natural: 2, full: 2, cross: 2, where: 3, group: 4, having: 5, window: 6, order: 7, limit: 8, offset: 9, fetch: 10, returning: 11, for: 12}
   defp sort(acc), do: Enum.sort_by(acc, fn {tag, _, _} -> Map.get(@order, tag) end, :asc)
 
   defp validate(_, %{validate: nil}, errors), do: errors
-  defp validate({tag, _, values}, %{validate: fun}, errors) when tag in ~w[select set having where on by order group returning insert into]a do
+  defp validate({tag, _, values}, %{validate: fun}, errors) when tag in ~w[select set having where on by order group returning insert into for]a do
     case validate_columns(fun, values, []) do
       [] -> errors
       e -> e++errors

@@ -34,7 +34,7 @@ defmodule SQL.Format do
   defp color(true, string, acc), do: [@keyword, string, @reset | acc]
   defp color(false, string, acc), do: [string | acc]
 
-  newline = ~w[select from join where having window limit offset fetch when else end returning set]a
+  newline = ~w[select from join where having window limit offset fetch when else end returning set for]a
   {reserved, non_reserved, operators} = SQL.BNF.get_rules()
 
   defp keyword(:upper, value), do: String.upcase(Atom.to_string(value))
