@@ -55,7 +55,7 @@ defmodule SQL.MixProject do
 
   defp deps do
     [
-      {:ex_doc, "~> 0.40.3", only: :dev},
+      {:ex_doc, "~> 0.40.4", only: :dev},
       {:yamerl, ">= 0.0.0", only: [:dev, :test]},
       {:unicode_set, "~> 1.7"}
     ]
