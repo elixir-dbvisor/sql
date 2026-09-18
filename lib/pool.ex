@@ -81,9 +81,7 @@ defmodule SQL.Pool do
 
   defp checkin(pool, queue, slot) do
     case :atomic_queue.checkin(queue, slot) do
-      :ok ->
-        Process.delete(SQL.Transaction)
-        :ok
+      :ok -> :ok
       :busy ->
         checkin(pool, queue, slot)
     end

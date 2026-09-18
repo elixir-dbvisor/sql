@@ -205,17 +205,42 @@ defmodule SQL.Adapters.Postgres do
     timestamp = :erlang.monotonic_time(:millisecond)
     ref = Process.send_after(conn, :cancel, sql.db_timeout)
     msg = if :bitset.is_prepared(prepared, id), do: be, else: pbe
-    send_data(socket, msg, sql)
+    send_data(socket, msg)
     result = drain(socket, conn, sql, make_ref(), id, prepared)
     Process.cancel_timer(ref)
     {:ok, result, :erlang.monotonic_time(:millisecond)-timestamp}
   end
 
-  defp send_data({:"$socket", _}=socket, data, _sql) do
-    :socket.send(socket, data)
+  @begin <<?Q, 10::32, "begin", 0>>
+  def begin(socket) do
+    send_data(socket, @begin)
   end
-  defp send_data(socket, data, _sql) do
-    :ssl.send(socket, data)
+
+  @commit <<?Q, 11::32, "commit", 0>>
+  def commit(socket) do
+    send_data(socket, @commit)
+    drain(socket)
+  end
+
+  @rollback <<?Q, 13::32, "rollback", 0>>
+  def rollback(socket) do
+    send_data(socket, @rollback)
+    drain(socket)
+  end
+
+  @savepoint <<?Q, 17::32, "savepoint sp", 0>>
+  def savepoint(socket) do
+    send_data(socket, @savepoint)
+  end
+
+  @release <<?Q, 25::32, "release savepoint sp", 0>>
+  def release(socket) do
+    send_data(socket, @release)
+  end
+
+  @rollback_to <<?Q, 29::32, "rollback to savepoint sp", 0>>
+  def rollback_to(socket) do
+    send_data(socket, @rollback_to)
   end
 
   defp send_data({:"$socket", _}=socket, data) do
@@ -231,6 +256,58 @@ defmodule SQL.Adapters.Postgres do
   end
   defp split("", "", acc), do: acc
   defp split("", v, acc), do: [v|acc]
+
+  defp drain(socket, ref \\ make_ref())
+  defp drain({:sslsocket, _, _, _, _, _, _, _}=socket, ref) do
+    case :ssl.recv(socket, 0) do
+      {:ok, data} -> process(data, socket, ref)
+    end
+  end
+  defp drain(socket, ref) do
+    case :socket.recv(socket, 0, [], ref) do
+      {:ok, data} -> process(data, socket, ref)
+      {:select, {:select_info, :recv, ^ref}} ->
+        receive do
+          {:"$socket", ^socket, :select, ^ref} ->
+            drain(socket, ref)
+        end
+    end
+  end
+
+  defp more(buffer, {:sslsocket, _, _, _, _, _, _, _}=socket, ref) do
+    case :ssl.recv(socket, 0) do
+      {:ok, data} -> process(buffer<>data, socket, ref)
+    end
+  end
+  defp more(buffer, socket, ref) do
+    case :socket.recv(socket, 0, [], ref) do
+      {:ok, data} -> process(buffer<>data, socket, ref)
+      {:select, {:select_info, :recv, ^ref}} ->
+        receive do
+          {:"$socket", ^socket, :select, ^ref} ->
+            more(buffer, socket, ref)
+        end
+    end
+  end
+
+
+  defp process(data, socket, ref) do
+    case data do
+      <<90, 5::32, 73>> -> :ok
+      <<90, 5::32, 84>> -> :ok
+      <<?C, 11::32, "COMMIT", 0, rest::binary>> ->
+        process(rest, socket, ref)
+      <<?C, 13::32, "ROLLBACK", 0, rest::binary>> ->
+        process(rest, socket, ref)
+      <<?E, len::32, data::binary-size(len-4)>> ->
+        send_data(socket, @sync)
+        raise RuntimeError, error(data)[:message]
+      <<_, len::32, _::binary-size(len-4), rest::binary>> ->
+        process(rest, socket, ref)
+      data ->
+        more(data, socket, ref)
+    end
+  end
 
   defp drain({:sslsocket, _, _, _, _, _, _, _}=socket, _conn, sql, ref, key, prepared) do
     case :ssl.recv(socket, 0) do
@@ -291,24 +368,25 @@ defmodule SQL.Adapters.Postgres do
       <<?C, 20::32, "CREATE DATABASE", 0, 51, 4::32>> ->
         send_data(socket, @sync)
         rows
-      <<?C, 10::32, "BEGIN", 0, 51, 4::32>> ->
-        rows
-      <<?C, 11::32, "COMMIT", 0, 51, 4::32>> ->
-        rows
-      <<?C, 12::32, "RELEASE", 0, 51, 4::32>> ->
-        rows
-      <<?C, 13::32, "ROLLBACK", 0, 51, 4::32>> ->
-        rows
-      <<?C, 14::32, "SAVEPOINT", 0, 51, 4::32>> ->
-        rows
+      <<?C, 10::32, "BEGIN", 0, rest::binary>> ->
+        process(rest, socket, sql,  rows, ref, key, prepared)
+      <<?C, 11::32, "COMMIT", 0, rest::binary>> ->
+        process(rest, socket, sql,  rows, ref, key, prepared)
+      <<?C, 12::32, "RELEASE", 0, rest::binary>> ->
+        process(rest, socket, sql,  rows, ref, key, prepared)
+      <<?C, 13::32, "ROLLBACK", 0, rest::binary>> ->
+        process(rest, socket, sql,  rows, ref, key, prepared)
+      <<?C, 14::32, "SAVEPOINT", 0, rest::binary>> ->
+        process(rest, socket, sql,  rows, ref, key, prepared)
       <<?E, len::32, data::binary-size(len-4)>> ->
         send_data(socket, @sync)
+        # {:error, error(data)[:message]}
         raise RuntimeError, error(data)[:message]
       <<?Z, len::32, _::binary-size(len-4), rest::binary>> ->
         process(rest, socket, sql,  rows, ref, key, prepared)
       <<?s, len::32, _payload::binary-size(len-4), rest::binary>> ->
         %SQL{msg: {_parse, _pbe, _be, execute, _close}}=sql
-        send_data(socket, execute, sql)
+        send_data(socket, execute)
         more([rest], socket, sql, rows, ref, key, prepared)
       <<50, 4::32, 51, 4::32>> ->
         rows
@@ -316,6 +394,8 @@ defmodule SQL.Adapters.Postgres do
         process(rest, socket, sql,  rows, ref, key, prepared)
       <<49, 4::32, rest::binary>> ->
         :bitset.mark_prepared(prepared, key)
+        process(rest, socket, sql,  rows, ref, key, prepared)
+      <<51, 4::32, rest::binary>> ->
         process(rest, socket, sql,  rows, ref, key, prepared)
       <<rest::binary>>->
         more([rest], socket, sql, rows, ref, key, prepared)

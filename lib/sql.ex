@@ -47,6 +47,25 @@ defmodule SQL do
     def to_string(sql), do: sql.string
   end
 
+  @doc false
+  defmacro in_transaction() do
+    if Application.get_env(:sql, :env) == :test do
+      block = quote do
+                self = self()
+                {:links, links} = Process.info(self, :links)
+                {:parent, parent} = Process.info(self, :parent)
+                [parent|links]
+                |> Kernel.++(Process.get(:"$callers", []))
+                |> Kernel.++(Process.get(:"$ancestors", []))
+                |> Enum.uniq()
+                |> Enum.find_value(&:persistent_term.get({SQL.Conn, &1}, nil))
+              end
+      quote(do: Process.get(SQL.Transaction) || unquote(block))
+    else
+      quote(do: Process.get(SQL.Transaction))
+    end
+  end
+
   @doc """
   Returns a parameterized SQL.
 
@@ -107,45 +126,45 @@ defmodule SQL do
     pool = opts[:pool] || Module.get_attribute(__CALLER__.module, :sql_pool, @pool)
     timeout = opts[:timeout] || Module.get_attribute(__CALLER__.module, :sql_queue_timeout, @queue_timeout)
     adapter = opts[:adapter] || Module.get_attribute(__CALLER__.module, :sql_adapter, @adapter)
-    id = :erlang.phash2(block)
-    savepoint = parse("savepoint sp_#{id}", [adapter: adapter, pool: pool])
-    release = parse("release savepoint sp_#{id}", [adapter: adapter, pool: pool])
-    rollback = parse("rollback to savepoint sp_#{id}", [adapter: adapter, pool: pool])
     quote generated: true do
-      case SQL.transaction() do
+      adapter = unquote(adapter)
+      pool = unquote(pool)
+      timeout = unquote(timeout)
+      case in_transaction() do
         nil ->
-          case SQL.Pool.checkout(unquote(pool), unquote(timeout)) do
+          case SQL.Pool.checkout(pool, timeout) do
             {:error, :timeout} = error -> error
             {:ok, conn, socket, prepared, slot} ->
               Process.put(SQL.Transaction, {conn, socket, prepared})
-              Stream.run(%{~SQL[begin] | pool: unquote(pool)})
               result = try do
+                adapter.begin(socket)
                 result = unquote(block)
-                Stream.run(%{~SQL[commit] | pool: unquote(pool)})
+                adapter.commit(socket)
                 case result do
                   {status, _} when status in ~w[error ok]a -> result
                   result -> {:ok, result}
                 end
               rescue
                 e ->
-                  Stream.run(%{~SQL[rollback] | pool: unquote(pool)})
+                  adapter.rollback(socket)
                   {:error, e}
               end
-              SQL.Pool.checkin(unquote(pool), slot)
+              SQL.Pool.checkin(pool, slot)
+              Process.put(SQL.Transaction, nil)
               result
           end
-        _ ->
-          Stream.run(unquote(Macro.escape(savepoint)))
+        {_conn, socket, _prepared} ->
+          adapter.savepoint(socket)
           try do
             result = unquote(block)
-            Stream.run(unquote(Macro.escape(release)))
+            adapter.release(socket)
             case result do
               {status, _} when status in ~w[error ok]a -> result
               result -> {:ok, result}
             end
           rescue
             e ->
-            Stream.run(unquote(Macro.escape(rollback)))
+              adapter.rollback_to(socket)
             {:error, e}
           end
       end
@@ -157,6 +176,7 @@ defmodule SQL do
   defmacro begin() do
     pool = Module.get_attribute(__CALLER__.module, :sql_pool, @pool)
     timeout = Module.get_attribute(__CALLER__.module, :sql_queue_timeout, @queue_timeout)
+    adapter = Module.get_attribute(__CALLER__.module, :sql_adapter, @adapter)
     quote generated: true do
       binding = binding()
       key = binding[:tags][:test] || unquote(__CALLER__.function)
@@ -167,7 +187,7 @@ defmodule SQL do
           :persistent_term.put(key, {conn, socket, prepared, slot})
           Process.put(SQL.Transaction, {conn, socket, prepared})
           :persistent_term.put({SQL.Conn, self()}, {conn, socket, prepared})
-          Stream.run(%{~SQL[begin] | pool: pool})
+          unquote(adapter).begin(socket)
       end
     end
   end
@@ -176,14 +196,16 @@ defmodule SQL do
   @doc since: "0.5.0"
   defmacro rollback() do
     pool = Module.get_attribute(__CALLER__.module, :sql_pool, @pool)
+    adapter = Module.get_attribute(__CALLER__.module, :sql_adapter, @adapter)
     quote generated: true do
       binding = binding()
       key = binding[:tags][:test] || unquote(__CALLER__.function)
       pool = binding[:pool] || unquote(pool)
       {conn, socket, prepared, slot} = :persistent_term.get(key)
       Process.put(SQL.Transaction, {conn, socket, prepared})
-      Stream.run(%{~SQL[rollback] | pool: pool})
+      unquote(adapter).rollback(socket)
       SQL.Pool.checkin(pool, slot)
+      Process.put(SQL.Transaction, nil)
     end
   end
 
@@ -191,14 +213,16 @@ defmodule SQL do
   @doc since: "0.5.0"
   defmacro commit() do
     pool = Module.get_attribute(__CALLER__.module, :sql_pool, @pool)
+    adapter = Module.get_attribute(__CALLER__.module, :sql_adapter, @adapter)
     quote generated: true do
       binding = binding()
       key = binding[:tags][:test] || unquote(__CALLER__.function)
       pool = binding[:pool] || unquote(pool)
       {conn, socket, prepared, slot} = :persistent_term.get(key)
       Process.put(SQL.Transaction, {conn, socket, prepared})
-      Stream.run(%{~SQL[commit] | pool: pool})
+      unquote(adapter).commit(socket)
       SQL.Pool.checkin(pool, slot)
+      Process.put(SQL.Transaction, nil)
     end
   end
 
@@ -371,7 +395,7 @@ defmodule SQL do
   end
   defp do_reduce(sql, acc, fun) do
     # time: System.convert_time_unit(:erlang.monotonic_time(:millisecond)-timestamp, :native, :millisecond)
-    case transaction() do
+    case in_transaction() do
       nil ->
         case SQL.Pool.checkout(sql.pool, sql.queue_timeout) do
           {:error, :timeout} -> raise RuntimeError, "timeout"
@@ -383,30 +407,6 @@ defmodule SQL do
       {conn, socket, prepared} ->
         {:ok, rows, _time} = sql.adapter.prepare_execute(socket, conn, sql, prepared)
         Enumerable.reduce(rows, acc, fun)
-    end
-  end
-
-  if Application.compile_env(:sql, :env) == :test do
-    @doc false
-    def transaction() do
-      case Process.get(SQL.Transaction) do
-        nil ->
-          {:links, links} = Process.info(self(), :links)
-          {:parent, parent} = Process.info(self(), :parent)
-          [parent|links]
-          |> Kernel.++(Process.get(:"$callers", []))
-          |> Kernel.++(Process.get(:"$ancestors", []))
-          |> Enum.uniq()
-          |> Enum.find_value(&:persistent_term.get({SQL.Conn, &1}, nil))
-
-        transaction ->
-          transaction
-      end
-    end
-  else
-    @doc false
-    def transaction() do
-      Process.get(SQL.Transaction)
     end
   end
 

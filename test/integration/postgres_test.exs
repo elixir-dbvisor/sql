@@ -156,7 +156,7 @@ defmodule SQL.Integration.PostgresTest do
     test "transaction state are propagated" do
       owner = Process.get(SQL.Transaction)
       parent = self()
-      fun = fn -> send(parent, SQL.transaction()) end
+      fun = fn -> send(parent, SQL.in_transaction()) end
       spawn_link(fun)
       assert_receive ^owner
 
