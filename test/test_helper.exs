@@ -59,6 +59,7 @@ end
 
 SQLTest.Postgres.start_all!()
 ExUnit.after_suite(&SQLTest.Postgres.stop_all!/1)
+ExUnit.after_suite(fn _ -> GenServer.cast(SQL.Counter, :stop) end)
 Mix.Task.run("sql.create", ["--quiet"])
 Application.ensure_all_started(:sql)
 ExUnit.start()

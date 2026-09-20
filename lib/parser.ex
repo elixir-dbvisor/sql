@@ -731,7 +731,6 @@ defmodule SQL.Parser do
   end
 
   defp __column__({:ident, _, col}, _aliases), do: :"#{col}"
-  # defp __column__({col, _, []}, _aliases), do: col
   defp __column__({:dot, _, [_, right]}, aliases), do: __column__(right, aliases)
   defp __column__({:comma, _, [right]}, aliases), do: __column__(right, aliases)
   defp __column__({_tag, _, [{:paren, _, [left, right]}]}, aliases), do: __column__(left, aliases) || __column__(right, aliases)

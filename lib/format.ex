@@ -157,12 +157,6 @@ defmodule SQL.Format do
   defp to_iodata({tag, [{_, {l,c,_,_,_,_}}|_]=m, [{_, [{_, {l,lc,_,_,_,_,_,_}}|_], _}=left, {_, [{_, {l,rc,_,_,_,_}}|_], _}=right]}, color, case, errors, indent, acc) when (c > lc and c < rc) do
     to_iodata(left, color, case, errors, indent, indention(to_iodata(tag, color, case, errors, 0, to_iodata(right, color, case, errors, 0, acc)), m, 0))
   end
-  # defp to_iodata({tag, [{_, {l,c,_,_,_,_}}|_]=m, [{_, [{_, {ll,cc,_,_,_,_}}|_], _}]=values}, color, case, errors, indent, acc) when (l == ll and c < cc and tag in ~w[desc asc not]a) do
-  #   to_iodata(values, color, case, errors, indent, indention(to_iodata(tag, color, case, errors, indent, acc), m, 0))
-  # end
-  # defp to_iodata({tag, [{_, {l,c,_,_,_,_}}|_]=m, [{_, [{_, {ll,cc,_,_,_,_,_,_}}|_], _}]=values}, color, case, errors, indent, acc) when (l == ll and c < cc and tag in ~w[desc asc not]a) do
-  #   to_iodata(values, color, case, errors, indent, indention(to_iodata(tag, color, case, errors, indent, acc), m, 0))
-  # end
   defp to_iodata({tag, m, values}, color, case, errors, indent, acc) when tag in ~w[desc asc not]a do
     to_iodata(values, color, case, errors, indent, indention(to_iodata(tag, color, case, errors, indent, acc), m, 0))
   end

@@ -48,6 +48,7 @@ defmodule SQL do
   end
 
   @doc false
+  @doc since: "0.6.0"
   defmacro in_transaction() do
     if Application.get_env(:sql, :env) == :test do
       block = quote do
@@ -369,43 +370,32 @@ defmodule SQL do
   def id(data, mod), do: id({mod, data})
 
   defp id(key) do
-    atomic = case :persistent_term.get(SQL.Counter, nil) do
-           	   nil ->
-                 atomic = :atomics.new(1, [])
-                 :persistent_term.put(SQL.Counter, atomic)
-                 atomic
-               atomic -> atomic
-             end
-    case :persistent_term.get(key, nil) do
-      nil ->
-        id = :atomics.add_get(atomic, 1, 1)
-        :persistent_term.put(key, id)
-        id
-      id -> id
+    case SQL.Counter.start_link() do
+     	{:ok, pid} -> GenServer.call(pid, {:add_get, key})
+     	{:error, {:already_started, pid}} -> GenServer.call(pid, {:add_get, key})
     end
   end
 
-
   @doc false
-  def reduce(%SQL{msg: nil}, _acc, _fun) do
-    raise RuntimeError, "Invalid Something"
+  def reduce(%SQL{adapter: adapter, msg: nil}, _acc, _fun) do
+    raise RuntimeError, "#{adapter} does not currently support this feature."
   end
   def reduce(sql, acc, fun) do
     do_reduce(sql, acc, fun)
   end
-  defp do_reduce(sql, acc, fun) do
+  defp do_reduce(%{pool: pool, adapter: adapter, queue_timeout: timeout}=sql, acc, fun) do
     # time: System.convert_time_unit(:erlang.monotonic_time(:millisecond)-timestamp, :native, :millisecond)
     case in_transaction() do
       nil ->
-        case SQL.Pool.checkout(sql.pool, sql.queue_timeout) do
+        case SQL.Pool.checkout(pool, timeout) do
           {:error, :timeout} -> raise RuntimeError, "timeout"
           {:ok, conn, socket, prepared, slot} ->
-            {:ok, rows, _time} = sql.adapter.prepare_execute(socket, conn, sql, prepared)
-            SQL.Pool.checkin(sql.pool, slot)
+            {:ok, rows, _time} = adapter.prepare_execute(socket, conn, sql, prepared)
+            SQL.Pool.checkin(pool, slot)
             Enumerable.reduce(rows, acc, fun)
         end
       {conn, socket, prepared} ->
-        {:ok, rows, _time} = sql.adapter.prepare_execute(socket, conn, sql, prepared)
+        {:ok, rows, _time} = adapter.prepare_execute(socket, conn, sql, prepared)
         Enumerable.reduce(rows, acc, fun)
     end
   end

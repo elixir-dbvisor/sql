@@ -483,7 +483,7 @@ defmodule SQL.Adapters.Postgres do
         {:module, _} -> mod
         {:error, _} ->
           loc = Macro.Env.location(__ENV__)
-          :dets.open_file(:sql, [type: :set, ram_file: true])
+          :dets.open_file(:sql, [type: :set, ram_file: true, file: ~c"#{Path.join(:code.priv_dir(:sql), "sql")}"])
           if :dets.member(:sql, mod) == false do
             :dets.insert(:sql, {mod, t, __MODULE__, loc})
             :dets.sync(:sql)

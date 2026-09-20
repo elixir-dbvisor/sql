@@ -5,7 +5,7 @@ defmodule SQL.Application do
   @moduledoc false
 
   def start(_type, _args) do
-    {:ok, _} = :dets.open_file(:sql, [type: :set, ram_file: true])
+    :dets.open_file(:sql, [type: :set, ram_file: true, file: ~c"#{Path.join(:code.priv_dir(:sql), "sql")}"])
     pools = Application.get_env(:sql, :pools, [])
     children = for {name, config} <- pools, do: %{id: name, start: {SQL.Pool, :start_link, [[{:name, name}|config]]}}
     result = Supervisor.start_link(children, strategy: :one_for_one)
@@ -18,6 +18,7 @@ defmodule SQL.Application do
   end
 
   def stop(_state) do
+    GenServer.call(SQL.Counter, :stop)
     :dets.sync(:sql)
     :dets.close(:sql)
   end
