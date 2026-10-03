@@ -1440,6 +1440,14 @@ defmodule SQL.Adapters.Postgres do
       end
     end
   end
+  defp encode(_type, value) do
+    quote generated: true do
+      case unquote(value) do
+        nil -> <<-1::32-big>>
+        value -> <<byte_size(value)::32-big, value::binary>>
+      end
+    end
+  end
 
   def to_oid(type) do
     case :persistent_term.get({:default, :oids}, nil) do
