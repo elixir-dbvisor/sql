@@ -10,9 +10,6 @@ defmodule Mix.Tasks.Sql.Create do
   @shortdoc "Create a database for each pool"
   def run(args) do
     {opts, _} = OptionParser.parse!(args, @opts)
-    app = Mix.Project.config()[:app]
-    Application.load(app)
-    Mix.Task.run("app.config", args)
     pools = Application.get_env(:sql, :pools)
     only = opts |> Keyword.take([:pool]) |> Keyword.values |> Enum.map(&String.to_atom/1)
     pools = if only != [], do: Enum.reject(pools, &elem(&1, 0) in only), else: pools

@@ -11,7 +11,8 @@ defmodule SQL.Adapters.Postgres.Queries do
     :persistent_term.put({pool, :columns}, columns(pool))
   end
 
-  defp columns(pool) do
+  @doc false
+  def columns(pool) do
     # ~SQL"select * from information_schema.columns where table_schema not in ('information_schema', 'pg_catalog')"
     # ~SQL"select * from information_schema.columns where table_schema not in ('mysql', 'performance_schema', 'sys')"
     # ~SQL"select * from sqlite_master join pragma_table_info (sqlite_master.name)"
