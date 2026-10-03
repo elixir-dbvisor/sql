@@ -32,14 +32,14 @@ defmodule SQL.Counter do
         {:reply, count, s}
       _ ->
         count = :atomics.add_get(atomic, 1, 1)
+        :dets.insert(:sql, [{__MODULE__, count}|Map.to_list(state)])
+        :dets.sync(:sql)
         {:reply, count, {Map.put(state, key, count), atomic}}
     end
   end
 
-  @impl true
-  def handle_cast(:stop, s) do
-    terminate(:normal, s)
-    {:noreply, s}
+  def handle_call(:stop, _from, s) do
+    {:reply, terminate(:normal, s), s}
   end
 
   @impl true
