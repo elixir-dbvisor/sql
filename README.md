@@ -119,6 +119,18 @@ end
   [%User{id: 1, email: "john@example.com"}, %User{id: 2, email: "jane@example.com"}]
 ```
 
+## Syntax highlighting
+
+Override keyword, literal, enclosed, and error colors in `config.exs`:
+
+```elixir
+config :sql, :syntax_colors,
+  keyword: IO.ANSI.magenta(),
+  literal: IO.ANSI.yellow(),
+  enclosed: IO.ANSI.green(),
+  error: IO.ANSI.red()
+```
+
 ## Compile time warning
 Run `mix sql.get` to generate your `sql.lock` file for error reporting.
 
