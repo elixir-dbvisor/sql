@@ -5,6 +5,14 @@
 
 # Changelog
 
+## v0.6.0 (2026-10-06)
+
+### Enhancement
+ - Added `SQL.transaction/2` which takes a keyword list of options as the first argument.
+ - Connection pool has been refactored and improved performance.
+ - A new benchmaking tool has been released: [sql_bench](https://github.com/elixir-dbvisor/sql_bench).
+ - Encoding and decoding is now specializad at compile-time which has improved performance.
+
 ## v0.5.0 (2026-03-31)
 
 ### Enhancement

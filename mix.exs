@@ -4,7 +4,7 @@
 defmodule SQL.MixProject do
   use Mix.Project
 
-  @version "0.6.0-dev"
+  @version "0.6.0"
 
   def project do
     [
