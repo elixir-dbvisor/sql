@@ -5,11 +5,11 @@ defmodule SQL.Format do
   @moduledoc false
   @moduledoc since: "0.4.0"
 
-  @error IO.ANSI.red()
+  @error Application.compile_env(:sql, [:syntax_colors, :error], IO.ANSI.red())
   @reset IO.ANSI.reset()
-  @keyword IO.ANSI.magenta()
-  @literal IO.ANSI.yellow()
-  @enclosed IO.ANSI.green()
+  @keyword Application.compile_env(:sql, [:syntax_colors, :keyword], IO.ANSI.magenta())
+  @literal Application.compile_env(:sql, [:syntax_colors, :literal], IO.ANSI.yellow())
+  @enclosed Application.compile_env(:sql, [:syntax_colors, :enclosed], IO.ANSI.green())
 
   @compile {:inline, indention: 3, newline: 2, pad: 1, keyword: 2, color: 3}
 

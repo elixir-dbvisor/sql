@@ -5,6 +5,11 @@
 
 # Changelog
 
+## Unreleased
+
+### Enhancement
+ - Syntax highlighting colors are configurable with `config :sql, :syntax_colors`.
+
 ## v0.6.0 (2026-10-06)
 
 ### Enhancement

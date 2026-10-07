@@ -4,7 +4,7 @@
 defmodule SQL.Inspect do
   @moduledoc false
 
-  @error IO.ANSI.red()
+  @error Application.compile_env(:sql, [:syntax_colors, :error], IO.ANSI.red())
   @reset IO.ANSI.reset()
 
   defimpl Inspect, for: SQL do
